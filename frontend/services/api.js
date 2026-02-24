@@ -2,9 +2,9 @@
 import { io } from 'socket.io-client';
 
 // 直接用 IP 和端口
-// 服务器部署用
-const API_BASE = 'http://121.40.35.46:3000/api';
-const WS_BASE = 'http://121.40.35.46:3000';
+// 通过 Nginx 代理（相对路径）
+const API_BASE = '/api';
+const WS_BASE = window.location.protocol + '//' + window.location.hostname;
 
 // ========== HTTP API ==========
 

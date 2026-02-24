@@ -5,6 +5,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 
 import apiRouter from './routes/api.js';
+import aiRouter from './routes/ai.js';
 import { setupSocket } from './socket.js';
 import { initDatabase } from './database.js';
 
@@ -26,6 +27,7 @@ app.use(express.json());
 
 // API 路由
 app.use('/api', apiRouter);
+app.use('/api', aiRouter);
 
 // 健康检查
 app.get('/health', (req, res) => {
