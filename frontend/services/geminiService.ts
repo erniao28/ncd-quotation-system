@@ -3,7 +3,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { Quotation, MaturityInfo } from "../types";
 
 // 硬编码 API Key
-const API_KEY = 'AIzaSyCtTaEi5Gw-L8I3ZWc8nnvRWBMRJ6DBNDQ';
+const API_KEY = 'AIzaSyAMNmCDL8_nB8to17DntoFLZMuHVpRAzeQ';
 
 const STANDARD_BANKS = `
 【大行及股份制 - 归类为 BIG】
