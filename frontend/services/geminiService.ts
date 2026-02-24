@@ -2,6 +2,9 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Quotation, MaturityInfo } from "../types";
 
+// 硬编码 API Key
+const API_KEY = 'AIzaSyCtTaEi5Gw-L8I3ZWc8nnvRWBMRJ6DBNDQ';
+
 const STANDARD_BANKS = `
 【大行及股份制 - 归类为 BIG】
 工商银行 农业银行 中国银行 建设银行 交通银行 邮储银行
@@ -15,8 +18,7 @@ const STANDARD_BANKS = `
 `;
 
 export async function parseMaturityDates(text: string): Promise<MaturityInfo[]> {
-  // 直接根据指令使用 process.env.API_KEY
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: API_KEY });
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: `请从以下文本中提取 NCD 到期日信息。
@@ -43,7 +45,7 @@ export async function parseMaturityDates(text: string): Promise<MaturityInfo[]> 
 }
 
 export async function parseQuotations(text: string, defaultWeekday: string): Promise<Partial<Quotation>[]> {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: API_KEY });
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: `你是一个专业的金融 NCD 数据录入员。
