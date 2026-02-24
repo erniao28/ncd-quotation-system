@@ -1,9 +1,9 @@
 // 后端 API 服务
 import { io } from 'socket.io-client';
 
-// 自动获取当前域名（支持本地和服务器）
-const API_BASE = `${window.location.protocol}//${window.location.hostname}:3000/api`;
-const WS_BASE = `${window.location.protocol}//${window.location.hostname}:3000`;
+// 使用相对路径，通过 Nginx 代理
+const API_BASE = '/api';
+const WS_BASE = window.location.protocol + '//' + window.location.hostname;
 
 // ========== HTTP API ==========
 
