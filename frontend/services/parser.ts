@@ -1,4 +1,4 @@
-// 简单的报价解析器 - 不需要 AI API
+// 简单的报价解析器 - 带模糊匹配和错别字纠正
 
 const BANKS = [
   '工商银行', '农业银行', '中国银行', '建设银行', '交通银行', '邮储银行',
@@ -21,19 +21,144 @@ const BANKS = [
   '太仓农商', '昆山农商'
 ];
 
-const RATING_KEYWORDS = {
-  'AAA': ['AAA', 'aaa', 'ＡＡＡ'],
-  'AA+': ['AA+', 'aa+', 'ＡＡ＋', 'AAplus', 'AA-'],
-  'AA': ['AA', 'aa', 'ＡＡ'],
-  'AA-': ['AA-', 'aa-']
+// 常见错别字纠正
+const TYPO_CORRECTIONS: Record<string, string> = {
+  '兴行银行': '兴业银行',
+  '兴银行': '兴业银行',
+  '信银行': '中信银行',
+  '发银行': '广发银行',
+  '浦发银行': '浦发银行',
+  '浦银行': '浦发银行',
+  '招商银行': '招商银行',
+  '招行': '招商银行',
+  '建行': '建设银行',
+  '工行': '工商银行',
+  '农行': '农业银行',
+  '中行': '中国银行',
+  '交行': '交通银行',
+  '邮储': '邮储银行',
+  '华夏银行': '华夏银行',
+  '光大银行': '光大银行',
+  '平安银行': '平安银行',
+  '恒丰银行': '恒丰银行',
+  '浙商银行': '浙商银行',
+  '渤海银行': '渤海银行',
+  '北京银行': '北京银行',
+  '上海银行': '上海银行',
+  '江苏银行': '江苏银行',
+  '宁波银行': '宁波银行',
+  '南京银行': '南京银行',
+  '杭州银行': '杭州银行',
 };
 
-const TENOR_KEYWORDS = {
-  '1M': ['1M', '1个月', '一个月'],
-  '3M': ['3M', '3个月', '三个月'],
-  '6M': ['6M', '6个月', '六个月'],
-  '9M': ['9M', '9个月', '九个月'],
-  '1Y': ['1Y', '1年', '一年', '12M']
+// 模糊匹配阈值
+const FUZZY_THRESHOLD = 0.6;
+
+// 编辑距离算法
+function levenshtein(a: string, b: string): number {
+  const matrix: number[][] = [];
+
+  for (let i = 0; i <= b.length; i++) {
+    matrix[i] = [i];
+  }
+  for (let j = 0; j <= a.length; j++) {
+    matrix[0][j] = j;
+  }
+
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j] + 1
+        );
+      }
+    }
+  }
+
+  return matrix[b.length][a.length];
+}
+
+// 计算相似度
+function similarity(a: string, b: string): number {
+  if (a === b) return 1;
+  const maxLen = Math.max(a.length, b.length);
+  if (maxLen === 0) return 1;
+  return 1 - levenshtein(a, b) / maxLen;
+}
+
+// 纠正错别字
+function correctTypo(text: string): string {
+  let corrected = text;
+  // 优先匹配长的错别字
+  const sortedKeys = Object.keys(TYPO_CORRECTIONS).sort((a, b) => b.length - a.length);
+
+  for (const typo of sortedKeys) {
+    if (corrected.includes(typo)) {
+      corrected = corrected.replace(typo, TYPO_CORRECTIONS[typo]);
+    }
+  }
+
+  return corrected;
+}
+
+// 模糊匹配银行
+function findBank(text: string): string | null {
+  const corrected = correctTypo(text);
+
+  // 先精确匹配
+  for (const bank of BANKS) {
+    if (corrected.includes(bank)) {
+      return bank;
+    }
+  }
+
+  // 模糊匹配
+  let bestMatch: string | null = null;
+  let bestScore = 0;
+
+  for (const bank of BANKS) {
+    // 提取银行名中的关键字进行匹配
+    for (let i = 2; i <= bank.length; i++) {
+      const keyword = bank.substring(0, i);
+      if (corrected.includes(keyword)) {
+        const score = i / bank.length;
+        if (score > bestScore) {
+          bestScore = score;
+          bestMatch = bank;
+        }
+      }
+    }
+
+    // 也检查银行名是否包含在文本中（反向匹配）
+    if (corrected.length >= 3) {
+      const score = similarity(corrected, bank);
+      if (score >= FUZZY_THRESHOLD && score > bestScore) {
+        bestScore = score;
+        bestMatch = bank;
+      }
+    }
+  }
+
+  return bestScore >= 0.5 ? bestMatch : null;
+}
+
+const RATING_KEYWORDS: Record<string, string[]> = {
+  'AAA': ['AAA', 'aaa', 'ＡＡＡ', '3A'],
+  'AA+': ['AA+', 'aa+', 'ＡＡ＋', 'AAplus', 'AAplus', 'AA+'],
+  'AA': ['AA', 'aa', 'ＡＡ'],
+  'AA-': ['AA-', 'aa-', 'ＡＡ－']
+};
+
+const TENOR_KEYWORDS: Record<string, string[]> = {
+  '1M': ['1M', '1个月', '一个月', '1月'],
+  '3M': ['3M', '3个月', '三个月', '3月'],
+  '6M': ['6M', '6个月', '六个月', '6月'],
+  '9M': ['9M', '9个月', '九个月', '9月'],
+  '1Y': ['1Y', '1年', '一年', '12M', '12个月']
 };
 
 const WEEKDAY_KEYWORDS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
@@ -49,19 +174,8 @@ function getCategory(bankName: string): string {
   return 'AAA';
 }
 
-function findBank(text: string): string | null {
-  // 按银行名长度排序（长匹配优先）
-  const sortedBanks = [...BANKS].sort((a, b) => b.length - a.length);
-
-  for (const bank of sortedBanks) {
-    if (text.includes(bank)) {
-      return bank;
-    }
-  }
-  return null;
-}
-
 function findRating(text: string): string {
+  // 先精确匹配
   for (const [rating, keywords] of Object.entries(RATING_KEYWORDS)) {
     for (const keyword of keywords) {
       if (text.includes(keyword)) {
@@ -69,6 +183,18 @@ function findRating(text: string): string {
       }
     }
   }
+
+  // 模糊匹配
+  const textLower = text.toLowerCase();
+  for (const [rating, keywords] of Object.entries(RATING_KEYWORDS)) {
+    for (const keyword of keywords) {
+      const score = similarity(textLower, keyword.toLowerCase());
+      if (score >= 0.8) {
+        return rating;
+      }
+    }
+  }
+
   return 'AAA';
 }
 
@@ -93,14 +219,15 @@ function findWeekday(text: string): string {
 }
 
 function findYieldRate(text: string): string {
-  // 匹配利率：1.62%、1.62%、162% 等
-  const ratePatterns = [
+  // 匹配各种格式的利率
+  const patterns = [
     /(\d+\.?\d*)%/,
     /(\d+\.?\d*)\s*%/,
-    /(\d+(\.\d+)?)%/,
+    /[税后税前]?\s*(\d+\.?\d*)\s*%/,
+    /(\d+\.?\d*)[%％]/,
   ];
 
-  for (const pattern of ratePatterns) {
+  for (const pattern of patterns) {
     const match = text.match(pattern);
     if (match) {
       return match[1];
@@ -110,17 +237,22 @@ function findYieldRate(text: string): string {
 }
 
 function findVolume(text: string): string {
-  // 匹配量：40e、20亿、50万等
-  const volumePatterns = [
+  const patterns = [
     /(\d+)\s*[eE]/,
-    /(\d+)\s*[亿萬]/,
+    /(\d+)\s*[亿億]/,
     /(\d+)\s*[万萬]/,
   ];
 
-  for (const pattern of volumePatterns) {
+  for (const pattern of patterns) {
     const match = text.match(pattern);
     if (match) {
-      return match[1] + (text.includes('亿') || text.includes('萬') ? '亿' : 'e');
+      if (text.includes('亿') || text.includes('億')) {
+        return match[1] + '亿';
+      }
+      if (text.includes('万') || text.includes('萬')) {
+        return match[1] + '万';
+      }
+      return match[1] + 'e';
     }
   }
   return '';
@@ -136,20 +268,34 @@ export function parseQuotation(text: string, defaultWeekday: string = '周一'):
   weekday: string;
 } | null {
 
-  const bankName = findBank(text);
-  if (!bankName) return null;
+  // 尝试找银行名
+  let bankName = findBank(text);
+
+  // 如果找不到匹配的银行，提取文本开头作为自定义银行名
+  if (!bankName) {
+    // 提取银行名（到评级或期限之前的内容）
+    const match = text.match(/^([^\s\d]{2,6})/);
+    if (match) {
+      bankName = match[1]; // 使用自定义名称
+    } else {
+      // 取前4个字符作为银行名
+      bankName = text.substring(0, Math.min(4, text.length));
+    }
+  }
 
   const rating = findRating(text);
   const tenor = findTenor(text);
   const yieldRate = findYieldRate(text);
   const volume = findVolume(text);
   const weekday = findWeekday(text) || defaultWeekday;
-  const category = getCategory(bankName);
+
+  // 如果找不到银行名但有期限和利率，也允许通过（自定义银行）
+  const category = getCategory(bankName || '');
 
   if (!tenor || !yieldRate) return null;
 
   return {
-    bankName,
+    bankName: bankName || '未知银行',
     rating,
     category,
     tenor,
@@ -160,12 +306,15 @@ export function parseQuotation(text: string, defaultWeekday: string = '周一'):
 }
 
 export function parseQuotations(text: string, defaultWeekday: string = '周一') {
-  // 按行分割
+  // 按行、逗号、分号分割
   const lines = text.split(/[\n,，;；]+/).filter(line => line.trim());
 
   const results = [];
   for (const line of lines) {
-    const parsed = parseQuotation(line.trim(), defaultWeekday);
+    const trimmed = line.trim();
+    if (trimmed.length < 3) continue;
+
+    const parsed = parseQuotation(trimmed, defaultWeekday);
     if (parsed) {
       results.push(parsed);
     }
@@ -175,21 +324,55 @@ export function parseQuotations(text: string, defaultWeekday: string = '周一')
 }
 
 export function parseMaturityDates(text: string): { tenor: string; date: string; weekday: string }[] {
-  // 匹配格式：1M 到期日 2025/10/16 周四
-  const pattern = /(\d+[MY])[^0-9]*(\d{1,4}[\/\-]\d{1,2}[\/\-]\d{1,2})[^周]*?(周[一二三四五六日])?/g;
+  // 多种格式匹配
+  const patterns = [
+    /(\d+[MY])[^0-9]*(\d{1,4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2})[^周]*/g,
+    /(\d+[MY])[^0-9]*到期日[^周]*/g,
+    /(到期日[^周]*)(\d{1,4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2})/g,
+  ];
 
-  const results = [];
-  let match;
+  const results: { tenor: string; date: string; weekday: string }[] = [];
+  const seen = new Set<string>();
 
-  while ((match = pattern.exec(text)) !== null) {
-    let tenor = match[1].toUpperCase();
-    if (tenor === '12M') tenor = '1Y';
+  // 提取期限和日期
+  for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      let tenor = match[1].toUpperCase().replace('MONTH', 'M').replace('YEAR', 'Y');
+      if (tenor === '12M') tenor = '1Y';
 
-    results.push({
-      tenor,
-      date: match[2],
-      weekday: match[3] || ''
-    });
+      // 提取日期
+      const dateMatch = match[0].match(/(\d{1,4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2})/);
+      const date = dateMatch ? dateMatch[1] : '';
+
+      // 提取星期
+      const weekdayMatch = text.match(/周[一二三四五六日]/);
+      const weekday = weekdayMatch ? weekdayMatch[0] : '';
+
+      const key = tenor + date;
+      if (!seen.has(key) && tenor && date) {
+        seen.add(key);
+        results.push({ tenor, date, weekday });
+      }
+    }
+  }
+
+  // 单独提取星期（如果有）
+  const weekdayMatches = text.matchAll(/周[一二三四五六日]/g);
+  for (const match of weekdayMatches) {
+    const weekday = match[0];
+    // 尝试找最近的日期
+    const idx = match.index || 0;
+    const nearbyText = text.substring(Math.max(0, idx - 20), idx + 5);
+    const dateMatch = nearbyText.match(/(\d{1,4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2})/);
+
+    if (dateMatch) {
+      for (const result of results) {
+        if (result.date === dateMatch[1] && !result.weekday) {
+          result.weekday = weekday;
+        }
+      }
+    }
   }
 
   return results;
