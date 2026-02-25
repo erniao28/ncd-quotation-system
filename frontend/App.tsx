@@ -139,16 +139,21 @@ const App: React.FC = () => {
       }
     } catch (error: any) {
       console.error("识别失败详情:", error);
-      alert('识别过程出错。请确保在 Vercel 环境变量中设置了 API_KEY 并重新部署。');
+      alert('解析过程出错，请检查输入格式。');
     }
     finally { setIsParsing(false); }
   };
 
   const handleConfirmAdd = async () => {
     const updatedQuotes = [...allQuotes];
+    let skippedCount = 0;
 
     for (const newPart of recognizedQuotes) {
-      if (!newPart.bankName || !newPart.yieldRate) continue;
+      // 跳过没有银行名或没有收益率的项
+      if (!newPart.bankName || !newPart.yieldRate) {
+        skippedCount++;
+        continue;
+      }
 
       const mat = maturities.find(m => m.tenor === newPart.tenor);
       const cleanRateStr = newPart.yieldRate.toString().replace(/[^\d.]/g, '');
@@ -209,6 +214,10 @@ const App: React.FC = () => {
     setAllQuotes(updatedQuotes);
     setRecognizedQuotes([]);
     setInputText('');
+
+    if (skippedCount > 0) {
+      alert(`已发布 ${recognizedQuotes.length - skippedCount} 条报价，${skippedCount} 条因缺少银行名或收益率被跳过`);
+    }
   };
 
   const handleUpdateQuote = async (id: string, field: keyof Quotation, value: string) => {
@@ -337,27 +346,142 @@ const App: React.FC = () => {
                onClick={handleParse}
                className="w-full mt-4 py-4 bg-indigo-600 text-white rounded-2xl font-bold shadow-xl hover:bg-indigo-700 transition-all disabled:opacity-50"
              >
-               {isParsing ? 'AI 正在处理...' : '一键解析并归档'}
+               {isParsing ? '正在解析...' : '解析报价'}
              </button>
           </section>
 
           {recognizedQuotes.length > 0 && (
             <div className="bg-slate-900 p-6 rounded-3xl shadow-2xl animate-in slide-in-from-bottom-4">
-              <h3 className="text-xs font-bold text-slate-400 mb-4 uppercase tracking-widest">解析结果确认 ({recognizedQuotes.length})</h3>
-              <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar text-white">
+              <h3 className="text-xs font-bold text-slate-400 mb-4 uppercase tracking-widest">解析结果确认 - 可编辑 ({recognizedQuotes.length})</h3>
+              <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar text-white">
                 {recognizedQuotes.map((q, i) => (
-                  <div key={i} className="bg-slate-800 p-3 rounded-xl border border-slate-700 flex flex-col gap-1">
-                    <div className="flex justify-between items-center">
-                      <span className="font-bold text-sm">{q.bankName}</span>
-                      <span className="text-indigo-400 font-bold text-sm">{q.yieldRate}%</span>
-                    </div>
-                    <div className="flex justify-between text-[10px] text-slate-500">
-                      <span>{q.tenor} | {q.rating} | {q.category}</span>
+                  <div key={i} className="bg-slate-800 p-3 rounded-xl border border-slate-700">
+                    <div className="flex flex-wrap gap-2 items-center">
+                      {/* 银行名 */}
+                      <div className="flex flex-col">
+                        <label className="text-[10px] text-slate-500">银行</label>
+                        <input
+                          className="w-24 bg-slate-700 text-white text-sm font-bold px-2 py-1 rounded outline-none focus:ring-1 focus:ring-indigo-500"
+                          value={q.bankName || ''}
+                          onChange={(e) => {
+                            const newQuotes = [...recognizedQuotes];
+                            newQuotes[i] = { ...newQuotes[i], bankName: e.target.value };
+                            setRecognizedQuotes(newQuotes);
+                          }}
+                        />
+                      </div>
+                      {/* 期限 */}
+                      <div className="flex flex-col">
+                        <label className="text-[10px] text-slate-500">期限</label>
+                        <select
+                          className="bg-slate-700 text-white text-sm px-2 py-1 rounded outline-none focus:ring-1 focus:ring-indigo-500"
+                          value={q.tenor || ''}
+                          onChange={(e) => {
+                            const newQuotes = [...recognizedQuotes];
+                            newQuotes[i] = { ...newQuotes[i], tenor: e.target.value };
+                            setRecognizedQuotes(newQuotes);
+                          }}
+                        >
+                          <option value="">请选择</option>
+                          <option value="1M">1M</option>
+                          <option value="3M">3M</option>
+                          <option value="6M">6M</option>
+                          <option value="9M">9M</option>
+                          <option value="1Y">1Y</option>
+                        </select>
+                      </div>
+                      {/* 收益率 */}
+                      <div className="flex flex-col">
+                        <label className="text-[10px] text-slate-500">收益率(%)</label>
+                        <input
+                          className="w-20 bg-slate-700 text-indigo-400 text-sm font-bold px-2 py-1 rounded outline-none focus:ring-1 focus:ring-indigo-500"
+                          value={q.yieldRate || ''}
+                          placeholder="如: 1.50"
+                          onChange={(e) => {
+                            const newQuotes = [...recognizedQuotes];
+                            newQuotes[i] = { ...newQuotes[i], yieldRate: e.target.value };
+                            setRecognizedQuotes(newQuotes);
+                          }}
+                        />
+                      </div>
+                      {/* 评级 */}
+                      <div className="flex flex-col">
+                        <label className="text-[10px] text-slate-500">评级</label>
+                        <select
+                          className="bg-slate-700 text-white text-sm px-2 py-1 rounded outline-none focus:ring-1 focus:ring-indigo-500"
+                          value={q.rating || 'AAA'}
+                          onChange={(e) => {
+                            const newQuotes = [...recognizedQuotes];
+                            newQuotes[i] = { ...newQuotes[i], rating: e.target.value };
+                            setRecognizedQuotes(newQuotes);
+                          }}
+                        >
+                          <option value="AAA">AAA</option>
+                          <option value="AA+">AA+</option>
+                          <option value="AA">AA</option>
+                          <option value="AA-">AA-</option>
+                        </select>
+                      </div>
+                      {/* 类别 */}
+                      <div className="flex flex-col">
+                        <label className="text-[10px] text-slate-500">类别</label>
+                        <select
+                          className="bg-slate-700 text-white text-sm px-2 py-1 rounded outline-none focus:ring-1 focus:ring-indigo-500"
+                          value={q.category || 'AAA'}
+                          onChange={(e) => {
+                            const newQuotes = [...recognizedQuotes];
+                            newQuotes[i] = { ...newQuotes[i], category: e.target.value };
+                            setRecognizedQuotes(newQuotes);
+                          }}
+                        >
+                          <option value="BIG">大行</option>
+                          <option value="AAA">AAA</option>
+                        </select>
+                      </div>
+                      {/* 星期 */}
+                      <div className="flex flex-col">
+                        <label className="text-[10px] text-slate-500">报价日</label>
+                        <select
+                          className="bg-slate-700 text-white text-sm px-2 py-1 rounded outline-none focus:ring-1 focus:ring-indigo-500"
+                          value={q.weekday || valueWeekday}
+                          onChange={(e) => {
+                            const newQuotes = [...recognizedQuotes];
+                            newQuotes[i] = { ...newQuotes[i], weekday: e.target.value };
+                            setRecognizedQuotes(newQuotes);
+                          }}
+                        >
+                          <option value="周一">周一</option>
+                          <option value="周二">周二</option>
+                          <option value="周三">周三</option>
+                          <option value="周四">周四</option>
+                          <option value="周五">周五</option>
+                        </select>
+                      </div>
+                      {/* 删除按钮 */}
+                      <div className="flex flex-col justify-end">
+                        <button
+                          onClick={() => {
+                            const newQuotes = recognizedQuotes.filter((_, idx) => idx !== i);
+                            setRecognizedQuotes(newQuotes);
+                          }}
+                          className="text-red-400 hover:text-red-300 text-xs"
+                        >
+                          删除
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}
               </div>
-              <button onClick={handleConfirmAdd} className="w-full mt-6 py-4 bg-emerald-500 text-white rounded-2xl font-bold hover:bg-emerald-400">发布到总表</button>
+              <div className="flex gap-2 mt-4">
+                <button
+                  onClick={() => setRecognizedQuotes([])}
+                  className="flex-1 py-3 bg-slate-700 text-slate-300 rounded-xl font-bold hover:bg-slate-600"
+                >
+                  取消
+                </button>
+                <button onClick={handleConfirmAdd} className="flex-1 py-3 bg-emerald-500 text-white rounded-2xl font-bold hover:bg-emerald-400">确认发布</button>
+              </div>
             </div>
           )}
         </div>

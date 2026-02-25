@@ -154,11 +154,11 @@ const RATING_KEYWORDS: Record<string, string[]> = {
 };
 
 const TENOR_KEYWORDS: Record<string, string[]> = {
-  '1M': ['1M', '1个月', '一个月', '1月'],
-  '3M': ['3M', '3个月', '三个月', '3月'],
-  '6M': ['6M', '6个月', '六个月', '6月'],
-  '9M': ['9M', '9个月', '九个月', '9月'],
-  '1Y': ['1Y', '1年', '一年', '12M', '12个月']
+  '1M': ['1M', '1m', '1MONTH', '1month', '1个月', '一个月', '1月', '一 month'],
+  '3M': ['3M', '3m', '3MONTH', '3month', '3个月', '三个月', '3月', '三 month'],
+  '6M': ['6M', '6m', '6MONTH', '6month', '6个月', '六个月', '6月', '六 month'],
+  '9M': ['9M', '9m', '9MONTH', '9month', '9个月', '九个月', '9月', '九 month'],
+  '1Y': ['1Y', '1y', '1YEAR', '1year', '1年', '一年', '12M', '12m', '12个月', '十二 month']
 };
 
 const WEEKDAY_KEYWORDS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
@@ -199,9 +199,10 @@ function findRating(text: string): string {
 }
 
 function findTenor(text: string): string {
+  const textLower = text.toLowerCase();
   for (const [tenor, keywords] of Object.entries(TENOR_KEYWORDS)) {
     for (const keyword of keywords) {
-      if (text.includes(keyword)) {
+      if (textLower.includes(keyword.toLowerCase())) {
         return tenor;
       }
     }
@@ -221,16 +222,23 @@ function findWeekday(text: string): string {
 function findYieldRate(text: string): string {
   // 匹配各种格式的利率
   const patterns = [
-    /(\d+\.?\d*)%/,
-    /(\d+\.?\d*)\s*%/,
-    /[税后税前]?\s*(\d+\.?\d*)\s*%/,
-    /(\d+\.?\d*)[%％]/,
+    // 带百分号：1.50% / 1.5% / 150%
+    /(\d+\.?\d*)\s*[%％]/,
+    // 不带百分号，但数字较大（超过10），认为是 Basis Point 形式，如 150 表示 1.50%
+    /(?:税后|税前)?\s*(\d{2,})\s*(?!%)/,
+    // 普通数字（带小数点）
+    /(\d+\.?\d*)/,
   ];
 
   for (const pattern of patterns) {
     const match = text.match(pattern);
     if (match) {
-      return match[1];
+      let value = parseFloat(match[1]);
+      // 如果数值大于等于100，认为是 BP 形式（如 150 表示 1.50%），自动除以100
+      if (value >= 100) {
+        value = value / 100;
+      }
+      return value.toFixed(2);
     }
   }
   return '';
@@ -292,7 +300,8 @@ export function parseQuotation(text: string, defaultWeekday: string = '周一'):
   // 如果找不到银行名但有期限和利率，也允许通过（自定义银行）
   const category = getCategory(bankName || '');
 
-  if (!tenor || !yieldRate) return null;
+  // 不再强制要求期限和收益率必须有值，改为返回空字符串让用户手动编辑
+  // if (!tenor || !yieldRate) return null;
 
   return {
     bankName: bankName || '未知银行',
