@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { Quotation, GroupedQuotation, MaturityInfo } from './types';
-import { parseQuotations, parseMaturityDates } from './services/geminiService';
+import { parseQuotations, parseMaturityDates } from './services/parser';
 import { VisualCard } from './components/VisualCard';
 import {
   initSocket,
