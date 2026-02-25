@@ -282,8 +282,8 @@ const App: React.FC = () => {
     return groupedQuotes.map(g => {
       const header = `(${g.tenor} 到期日 ${g.maturityDate} ${g.maturityWeekday})`;
       const rows = g.items.map(i => {
-        const vol = i.volume ? `${i.volume} +` : '';
-        return `${i.bankName}\t${i.rating}\t${i.weekday}\t${i.tenor}\t${i.yieldRate} ${vol} ${i.remarks}`.trim();
+        const vol = i.volume ? `${i.volume}` : '';
+        return `${i.bankName} ${i.rating} ${i.weekday} ${i.tenor} ${i.yieldRate} ${vol} ${i.remarks}`.trim();
       }).join('\n');
       return `${header}\n${rows}`;
     }).join('\n\n');
@@ -339,7 +339,7 @@ const App: React.FC = () => {
                value={inputText}
                onChange={e => setInputText(e.target.value)}
                className="w-full h-40 p-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm outline-none focus:border-indigo-200 transition-all resize-none"
-               placeholder="直接粘贴格式: 兴业银行 AAA 周一 6M 1.62%"
+               placeholder="可一次粘贴多条，格式: 兴业银行 AAA 周一 6M 1.62%，支持多行、逗号分隔"
              ></textarea>
              <button
                disabled={isParsing}
@@ -491,7 +491,7 @@ const App: React.FC = () => {
             <div className="flex flex-col md:flex-row justify-between items-center gap-4">
                <div className="flex bg-slate-100 p-1 rounded-xl">
                  <button onClick={() => setActiveTab('VISUAL')} className={`px-6 py-2 rounded-lg text-xs font-bold transition-all ${activeTab === 'VISUAL' ? 'bg-white shadow text-slate-900' : 'text-slate-400'}`}>看板视图</button>
-                 <button onClick={() => setActiveTab('TEXT')} className={`px-6 py-2 rounded-lg text-xs font-bold transition-all ${activeTab === 'TEXT' ? 'bg-white shadow text-slate-900' : 'text-slate-400'}`}>预览编辑</button>
+                 <button onClick={() => setActiveTab('TEXT')} className={`px-6 py-2 rounded-lg text-xs font-bold transition-all ${activeTab === 'TEXT' ? 'bg-white shadow text-slate-900' : 'text-slate-400'}`}>文字版</button>
                </div>
 
                <div className="flex flex-wrap gap-2 items-center">
@@ -547,6 +547,16 @@ const App: React.FC = () => {
                             />
                             <input className="w-12 text-slate-400 text-xs text-center" value={item.volume} placeholder="量" onChange={e => handleUpdateQuote(item.id, 'volume', e.target.value)} />
                             <input className="flex-1 text-slate-400 italic text-xs truncate" value={item.remarks} placeholder="备注" onChange={e => handleUpdateQuote(item.id, 'remarks', e.target.value)} />
+                            <button
+                              onClick={() => {
+                                const text = `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}`;
+                                navigator.clipboard.writeText(text);
+                              }}
+                              className="opacity-0 group-hover:opacity-100 text-blue-300 hover:text-blue-500 transition-all text-xs font-bold"
+                              title="复制此行"
+                            >
+                              复制
+                            </button>
                             <button onClick={() => handleDeleteQuote(item.id)} className="opacity-0 group-hover:opacity-100 text-red-300 hover:text-red-500 transition-all text-xs font-bold">删除</button>
                           </div>
                         ))}
@@ -561,7 +571,7 @@ const App: React.FC = () => {
         </div>
       </main>
       <footer className="p-8 text-center text-[10px] text-slate-300 font-bold uppercase tracking-widest">
-        Professional NCD Engine • Powered by Gemini AI • Accuracy Guaranteed • 多人实时协作
+        Professional NCD Engine • 智能解析 • 多人实时协作
       </footer>
     </div>
   );

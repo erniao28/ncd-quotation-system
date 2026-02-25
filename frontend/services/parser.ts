@@ -315,8 +315,8 @@ export function parseQuotation(text: string, defaultWeekday: string = '周一'):
 }
 
 export function parseQuotations(text: string, defaultWeekday: string = '周一') {
-  // 按行、逗号、分号分割
-  const lines = text.split(/[\n,，;；]+/).filter(line => line.trim());
+  // 按行、逗号、分号、空格分割
+  const lines = text.split(/[\n,，;；\t]+/).filter(line => line.trim());
 
   const results = [];
   for (const line of lines) {
@@ -324,12 +324,49 @@ export function parseQuotations(text: string, defaultWeekday: string = '周一')
     if (trimmed.length < 3) continue;
 
     const parsed = parseQuotation(trimmed, defaultWeekday);
+    // 不管是否能完全解析，都返回结果，让用户可以手动编辑
     if (parsed) {
       results.push(parsed);
+    } else {
+      // 即使解析失败，也尝试提取信息返回
+      const partial = tryParsePartial(trimmed, defaultWeekday);
+      if (partial) {
+        results.push(partial);
+      }
     }
   }
 
   return results;
+}
+
+// 尝试部分解析
+function tryParsePartial(text: string, defaultWeekday: string) {
+  const bankName = findBank(text) || extractBankName(text);
+  const tenor = findTenor(text);
+  const rating = findRating(text);
+  const yieldRate = findYieldRate(text);
+  const weekday = findWeekday(text) || defaultWeekday;
+  const volume = findVolume(text);
+
+  // 至少要有银行名或期限或收益率之一
+  if (!bankName && !tenor && !yieldRate) return null;
+
+  return {
+    bankName: bankName || '',
+    rating: rating || 'AAA',
+    category: getCategory(bankName || ''),
+    tenor: tenor || '',
+    yieldRate: yieldRate || '',
+    volume: volume || '',
+    weekday
+  };
+}
+
+// 提取银行名（当模糊匹配失败时）
+function extractBankName(text: string): string {
+  // 提取开头的文字作为银行名
+  const match = text.match(/^([\u4e00-\u9fa5a-zA-Z]{2,6})/);
+  return match ? match[1] : '';
 }
 
 export function parseMaturityDates(text: string): { tenor: string; date: string; weekday: string }[] {
