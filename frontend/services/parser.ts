@@ -36,6 +36,7 @@ const TYPO_CORRECTIONS: Record<string, string> = {
   '农行': '农业银行',
   '中行': '中国银行',
   '交行': '交通银行',
+  '交通': '交通银行',
   '邮储': '邮储银行',
   '华夏银行': '华夏银行',
   '光大银行': '光大银行',
@@ -319,6 +320,8 @@ export function parseQuotations(text: string, defaultWeekday: string = '周一')
   const lines = text.split(/[\n,，;；\t]+/).filter(line => line.trim());
 
   const results = [];
+  let lastBankName = ''; // 记录上一个银行名，用于继承
+
   for (const line of lines) {
     const trimmed = line.trim();
     if (trimmed.length < 3) continue;
@@ -326,11 +329,32 @@ export function parseQuotations(text: string, defaultWeekday: string = '周一')
     const parsed = parseQuotation(trimmed, defaultWeekday);
     // 不管是否能完全解析，都返回结果，让用户可以手动编辑
     if (parsed) {
+      // 如果解析出了银行名，更新lastBankName
+      if (parsed.bankName && parsed.bankName !== '未知银行') {
+        lastBankName = parsed.bankName;
+      } else if (lastBankName) {
+        // 如果没有解析出银行名但有期限或收益率，继承上一个银行名
+        if (parsed.tenor || parsed.yieldRate) {
+          parsed.bankName = lastBankName;
+          parsed.category = getCategory(lastBankName);
+        }
+      }
       results.push(parsed);
     } else {
       // 即使解析失败，也尝试提取信息返回
       const partial = tryParsePartial(trimmed, defaultWeekday);
       if (partial) {
+        // 尝试从文本中提取银行名
+        const bankInText = findBank(trimmed) || extractBankName(trimmed);
+        if (bankInText) {
+          lastBankName = bankInText;
+          partial.bankName = bankInText;
+          partial.category = getCategory(bankInText);
+        } else if (lastBankName) {
+          // 继承上一个银行名
+          partial.bankName = lastBankName;
+          partial.category = getCategory(lastBankName);
+        }
         results.push(partial);
       }
     }
