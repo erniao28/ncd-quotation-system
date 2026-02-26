@@ -316,46 +316,104 @@ export function parseQuotation(text: string, defaultWeekday: string = '周一'):
 }
 
 export function parseQuotations(text: string, defaultWeekday: string = '周一') {
-  // 按行、逗号、分号、空格分割
-  const lines = text.split(/[\n,，;；\t]+/).filter(line => line.trim());
+  // 按行、逗号、分号分割（不在这里按空格分割，留给解析器处理）
+  const lines = text.split(/[\n,，;；]+/).filter(line => line.trim());
 
   const results = [];
   let lastBankName = ''; // 记录上一个银行名，用于继承
 
   for (const line of lines) {
     const trimmed = line.trim();
-    if (trimmed.length < 3) continue;
+    if (trimmed.length < 1) continue;
 
-    const parsed = parseQuotation(trimmed, defaultWeekday);
-    // 不管是否能完全解析，都返回结果，让用户可以手动编辑
-    if (parsed) {
-      // 如果解析出了银行名，更新lastBankName
-      if (parsed.bankName && parsed.bankName !== '未知银行') {
-        lastBankName = parsed.bankName;
-      } else if (lastBankName) {
-        // 如果没有解析出银行名但有期限或收益率，继承上一个银行名
-        if (parsed.tenor || parsed.yieldRate) {
+    // 先尝试提取银行名（通常在开头）
+    const bankInLine = findBank(trimmed) || extractBankName(trimmed);
+    if (bankInLine) {
+      lastBankName = bankInLine;
+    }
+
+    // 如果有银行名，先去掉银行名部分，剩余的按空格分割成多个报价
+    let textToParse = trimmed;
+    if (bankInLine && trimmed.startsWith(bankInLine)) {
+      textToParse = trimmed.substring(bankInLine.length).trim();
+    }
+
+    // 按空格分割，解析每一条
+    const parts = textToParse.split(/\s+/).filter(p => p);
+
+    if (parts.length === 0) {
+      // 只有银行名，没有报价
+      if (lastBankName) {
+        results.push({
+          bankName: lastBankName,
+          rating: 'AAA',
+          category: getCategory(lastBankName),
+          tenor: '',
+          yieldRate: '',
+          volume: '',
+          weekday: defaultWeekday
+        });
+      }
+      continue;
+    }
+
+    // 尝试把多个部分组合成报价
+    // 格式可能是: [期限] [收益率] [期限] [收益率] ...
+    let i = 0;
+    while (i < parts.length) {
+      const part = parts[i];
+      const tenor = findTenor(part);
+      const yieldRate = findYieldRate(part);
+
+      if (tenor || yieldRate) {
+        // 找到期限或收益率，构建一条报价
+        const quote = {
+          bankName: lastBankName || '',
+          rating: 'AAA',
+          category: getCategory(lastBankName || ''),
+          tenor: tenor || '',
+          yieldRate: yieldRate || '',
+          volume: '',
+          weekday: defaultWeekday
+        };
+        results.push(quote);
+      } else if (lastBankName && part === '-') {
+        // 跳过这种格式：1M -
+        // 下一部分可能是收益率
+      } else {
+        // 可能是银行名缩写，更新lastBankName
+        const bank = findBank(part);
+        if (bank) {
+          lastBankName = bank;
+        }
+      }
+      i++;
+    }
+
+    // 如果没有解析出任何报价，尝试用原来的方式解析整行
+    if (results.length === 0 || (results.length > 0 && results[results.length - 1].tenor === '' && results[results.length - 1].yieldRate === '')) {
+      const parsed = parseQuotation(trimmed, defaultWeekday);
+      if (parsed) {
+        if (parsed.bankName && parsed.bankName !== '未知银行') {
+          lastBankName = parsed.bankName;
+        } else if (lastBankName && (parsed.tenor || parsed.yieldRate)) {
           parsed.bankName = lastBankName;
           parsed.category = getCategory(lastBankName);
         }
-      }
-      results.push(parsed);
-    } else {
-      // 即使解析失败，也尝试提取信息返回
-      const partial = tryParsePartial(trimmed, defaultWeekday);
-      if (partial) {
-        // 尝试从文本中提取银行名
-        const bankInText = findBank(trimmed) || extractBankName(trimmed);
-        if (bankInText) {
-          lastBankName = bankInText;
-          partial.bankName = bankInText;
-          partial.category = getCategory(bankInText);
-        } else if (lastBankName) {
-          // 继承上一个银行名
-          partial.bankName = lastBankName;
-          partial.category = getCategory(lastBankName);
+        results.push(parsed);
+      } else {
+        const partial = tryParsePartial(trimmed, defaultWeekday);
+        if (partial) {
+          if (bankInLine) {
+            lastBankName = bankInLine;
+            partial.bankName = bankInLine;
+            partial.category = getCategory(bankInLine);
+          } else if (lastBankName) {
+            partial.bankName = lastBankName;
+            partial.category = getCategory(lastBankName);
+          }
+          results.push(partial);
         }
-        results.push(partial);
       }
     }
   }
