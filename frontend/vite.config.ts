@@ -8,11 +8,22 @@ export default defineConfig(({ mode }) => {
       server: {
         port: 5173,
         host: '0.0.0.0',
+        proxy: {
+          '/api': {
+            target: 'http://localhost:3000',
+            changeOrigin: true,
+          },
+          '/socket.io': {
+            target: 'http://localhost:3000',
+            changeOrigin: true,
+            ws: true,
+          },
+        },
       },
       plugins: [react()],
       define: {
-        'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY || 'AIzaSyCtTaEi5Gw-L8I3ZWc8nnvRWBMRJ6DBNDQ'),
-        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY || 'AIzaSyCtTaEi5Gw-L8I3ZWc8nnvRWBMRJ6DBNDQ')
+        'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY || ''),
+        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY || '')
       },
       resolve: {
         alias: {

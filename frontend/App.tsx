@@ -35,6 +35,8 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'VISUAL' | 'TEXT'>('VISUAL');
   const [copyFeedback, setCopyFeedback] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
+  const [selectedQuotes, setSelectedQuotes] = useState<Set<string>>(new Set());
+  const [copySuccessMsg, setCopySuccessMsg] = useState('');
 
   // 初始化数据加载和 WebSocket
   useEffect(() => {
@@ -289,10 +291,48 @@ const App: React.FC = () => {
     }).join('\n\n');
   }, [groupedQuotes]);
 
-  const handleCopy = () => {
+  // 复制选中报价的函数
+  const handleCopySelected = () => {
+    const selectedItems = groupedQuotes.flatMap(g =>
+      g.items.filter(i => selectedQuotes.has(i.id))
+    );
+    if (selectedItems.length === 0) {
+      setCopySuccessMsg('请先选择要复制的报价');
+      setTimeout(() => setCopySuccessMsg(''), 2000);
+      return;
+    }
+    const text = selectedItems.map(i => {
+      return `${i.bankName} ${i.rating} ${i.weekday} ${i.tenor} ${i.yieldRate}`;
+    }).join('\n');
+    navigator.clipboard.writeText(text);
+    setCopySuccessMsg(`已复制 ${selectedItems.length} 条报价`);
+    setTimeout(() => setCopySuccessMsg(''), 2000);
+  };
+
+  const handleCopyAll = () => {
     navigator.clipboard.writeText(exportText);
     setCopyFeedback(true);
     setTimeout(() => setCopyFeedback(false), 2000);
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedQuotes(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
+      return newSet;
+    });
+  };
+
+  const selectAll = () => {
+    if (selectedQuotes.size === filteredQuotes.length) {
+      setSelectedQuotes(new Set());
+    } else {
+      setSelectedQuotes(new Set(filteredQuotes.map(q => q.id)));
+    }
   };
 
   return (
@@ -310,9 +350,13 @@ const App: React.FC = () => {
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">起息周几:</span>
             <input value={valueWeekday} onChange={e => setValueWeekday(e.target.value)} className="bg-transparent w-8 text-indigo-600 font-bold border-none outline-none text-sm text-center" />
           </div>
-          <button onClick={handleCopy} className={`px-6 py-2 rounded-xl text-sm font-bold shadow-lg transition-all ${copyFeedback ? 'bg-emerald-500 text-white' : 'bg-slate-900 text-white hover:bg-slate-800'}`}>
-            {copyFeedback ? '复制成功' : '复制报价文本'}
+          <button onClick={handleCopySelected} className="px-4 py-2 rounded-xl text-sm font-bold bg-indigo-600 text-white hover:bg-indigo-700 transition-all">
+            复制选中 ({selectedQuotes.size})
           </button>
+          <button onClick={handleCopyAll} className={`px-4 py-2 rounded-xl text-sm font-bold shadow-lg transition-all ${copyFeedback ? 'bg-emerald-500 text-white' : 'bg-slate-900 text-white hover:bg-slate-800'}`}>
+            {copyFeedback ? '复制成功' : '复制全部'}
+          </button>
+          {copySuccessMsg && <span className="text-emerald-500 text-sm font-bold self-center">{copySuccessMsg}</span>}
         </div>
       </header>
 
@@ -520,7 +564,12 @@ const App: React.FC = () => {
             ) : (
               <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 flex-1 flex flex-col">
                 <div className="flex justify-between items-center mb-6">
-                  <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">可编辑预览模式 (自动保存)</h3>
+                  <div className="flex items-center gap-4">
+                    <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">文字版 (自动保存)</h3>
+                    <button onClick={selectAll} className="text-[10px] font-bold text-indigo-400 hover:text-indigo-600">
+                      {selectedQuotes.size === filteredQuotes.length ? '取消全选' : '全选'}
+                    </button>
+                  </div>
                   <button onClick={() => {if(confirm('清空所有？')) setAllQuotes([])}} className="text-[10px] font-bold text-red-400 hover:text-red-600 uppercase">Clear All</button>
                 </div>
                 <div className="space-y-8 flex-1">
@@ -533,6 +582,12 @@ const App: React.FC = () => {
                       <div className="space-y-2">
                         {group.items.map(item => (
                           <div key={item.id} className="flex flex-wrap gap-2 items-center group py-1.5 hover:bg-white rounded-lg px-3 transition-colors">
+                            <input
+                              type="checkbox"
+                              checked={selectedQuotes.has(item.id)}
+                              onChange={() => toggleSelect(item.id)}
+                              className="w-4 h-4 text-indigo-600 rounded"
+                            />
                             <input
                               className="w-28 font-bold bg-transparent border-none focus:bg-white outline-none p-0 text-slate-900"
                               value={item.bankName}
@@ -551,6 +606,8 @@ const App: React.FC = () => {
                               onClick={() => {
                                 const text = `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}`;
                                 navigator.clipboard.writeText(text);
+                                setCopySuccessMsg('已复制');
+                                setTimeout(() => setCopySuccessMsg(''), 1500);
                               }}
                               className="opacity-0 group-hover:opacity-100 text-blue-300 hover:text-blue-500 transition-all text-xs font-bold"
                               title="复制此行"
