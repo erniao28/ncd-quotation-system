@@ -316,7 +316,7 @@ export function parseQuotation(text: string, defaultWeekday: string = '周一'):
 }
 
 export function parseQuotations(text: string, defaultWeekday: string = '周一') {
-  // 按行、逗号、分号分割（不在这里按空格分割，留给解析器处理）
+  // 按行、逗号、分号分割
   const lines = text.split(/[\n,，;；]+/).filter(line => line.trim());
 
   const results = [];
@@ -326,24 +326,76 @@ export function parseQuotations(text: string, defaultWeekday: string = '周一')
     const trimmed = line.trim();
     if (trimmed.length < 1) continue;
 
-    // 先尝试提取银行名（通常在开头）
+    // 1. 先提取银行名
     const bankInLine = findBank(trimmed) || extractBankName(trimmed);
-    if (bankInLine) {
-      lastBankName = bankInLine;
+    let currentBankName = bankInLine;
+    if (currentBankName) {
+      lastBankName = currentBankName;
     }
 
-    // 如果有银行名，先去掉银行名部分，剩余的按空格分割成多个报价
+    // 2. 去掉银行名后，提取期限+收益率的组合
     let textToParse = trimmed;
-    if (bankInLine && trimmed.startsWith(bankInLine)) {
-      textToParse = trimmed.substring(bankInLine.length).trim();
+    if (currentBankName && trimmed.includes(currentBankName)) {
+      textToParse = trimmed.replace(currentBankName, '').trim();
     }
 
-    // 按空格分割，解析每一条
-    const parts = textToParse.split(/\s+/).filter(p => p);
+    // 用正则同时匹配期限和收益率：支持有空格和无空格
+    // 3M1.5, 3M 1.5, 3M1.50, 3M 150, 3M1.5% 等
+    const tenorYieldPattern = /(1M|3M|6M|9M|1Y|1m|3m|6m|9m|1y)\s*(\d{1,2}\.?\d{0,2}%?)/gi;
+    let match;
+    const foundQuotes: any[] = [];
 
-    if (parts.length === 0) {
-      // 只有银行名，没有报价
-      if (lastBankName) {
+    while ((match = tenorYieldPattern.exec(textToParse)) !== null) {
+      let tenor = match[1].toUpperCase();
+      // 统一期限格式
+      if (tenor === '1M') tenor = '1M';
+      if (tenor === '3M') tenor = '3M';
+      if (tenor === '6M') tenor = '6M';
+      if (tenor === '9M') tenor = '9M';
+      if (tenor === '1Y' || tenor === '1YEAR') tenor = '1Y';
+
+      let yieldRate = match[2];
+      // 处理收益率：1.5 -> 1.50%, 150 -> 150(如果带%), 否则保持
+      // 如果没有百分号且数值>=100，认为是BP形式(如150=1.50%)
+      if (!yieldRate.includes('%')) {
+        const num = parseFloat(yieldRate);
+        if (num >= 100) {
+          yieldRate = (num / 100).toFixed(2);
+        } else {
+          yieldRate = num.toFixed(2);
+        }
+      }
+
+      foundQuotes.push({ tenor, yieldRate });
+    }
+
+    // 3. 如果找到期限+收益率，生成报价
+    if (foundQuotes.length > 0) {
+      for (const q of foundQuotes) {
+        results.push({
+          bankName: currentBankName || lastBankName || '',
+          rating: 'AAA',
+          category: getCategory(currentBankName || lastBankName || ''),
+          tenor: q.tenor,
+          yieldRate: q.yieldRate,
+          volume: '',
+          weekday: defaultWeekday
+        });
+      }
+    } else {
+      // 4. 如果没找到，用原来的方式解析整行
+      const parsed = parseQuotation(trimmed, defaultWeekday);
+      if (parsed) {
+        if (parsed.bankName && parsed.bankName !== '未知银行') {
+          lastBankName = parsed.bankName;
+          currentBankName = parsed.bankName;
+        } else if (lastBankName && (parsed.tenor || parsed.yieldRate)) {
+          parsed.bankName = lastBankName;
+          parsed.category = getCategory(lastBankName);
+        }
+        results.push(parsed);
+      } else if (lastBankName) {
+        // 如果完全没有解析出任何信息，但有银行名，也返回一行
         results.push({
           bankName: lastBankName,
           rating: 'AAA',
@@ -353,67 +405,6 @@ export function parseQuotations(text: string, defaultWeekday: string = '周一')
           volume: '',
           weekday: defaultWeekday
         });
-      }
-      continue;
-    }
-
-    // 尝试把多个部分组合成报价
-    // 格式可能是: [期限] [收益率] [期限] [收益率] ...
-    let i = 0;
-    while (i < parts.length) {
-      const part = parts[i];
-      const tenor = findTenor(part);
-      const yieldRate = findYieldRate(part);
-
-      if (tenor || yieldRate) {
-        // 找到期限或收益率，构建一条报价
-        const quote = {
-          bankName: lastBankName || '',
-          rating: 'AAA',
-          category: getCategory(lastBankName || ''),
-          tenor: tenor || '',
-          yieldRate: yieldRate || '',
-          volume: '',
-          weekday: defaultWeekday
-        };
-        results.push(quote);
-      } else if (lastBankName && part === '-') {
-        // 跳过这种格式：1M -
-        // 下一部分可能是收益率
-      } else {
-        // 可能是银行名缩写，更新lastBankName
-        const bank = findBank(part);
-        if (bank) {
-          lastBankName = bank;
-        }
-      }
-      i++;
-    }
-
-    // 如果没有解析出任何报价，尝试用原来的方式解析整行
-    if (results.length === 0 || (results.length > 0 && results[results.length - 1].tenor === '' && results[results.length - 1].yieldRate === '')) {
-      const parsed = parseQuotation(trimmed, defaultWeekday);
-      if (parsed) {
-        if (parsed.bankName && parsed.bankName !== '未知银行') {
-          lastBankName = parsed.bankName;
-        } else if (lastBankName && (parsed.tenor || parsed.yieldRate)) {
-          parsed.bankName = lastBankName;
-          parsed.category = getCategory(lastBankName);
-        }
-        results.push(parsed);
-      } else {
-        const partial = tryParsePartial(trimmed, defaultWeekday);
-        if (partial) {
-          if (bankInLine) {
-            lastBankName = bankInLine;
-            partial.bankName = bankInLine;
-            partial.category = getCategory(bankInLine);
-          } else if (lastBankName) {
-            partial.bankName = lastBankName;
-            partial.category = getCategory(lastBankName);
-          }
-          results.push(partial);
-        }
       }
     }
   }
