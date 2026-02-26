@@ -224,17 +224,17 @@ function findYieldRate(text: string): string {
   const patterns = [
     // 带百分号：1.50% / 1.5% / 150%
     /(\d+\.?\d*)\s*[%％]/,
-    // 不带百分号，但数字较大（超过10），认为是 Basis Point 形式，如 150 表示 1.50%
+    // 不带百分号，但数字>=100，认为是BP形式，如150表示1.50%
     /(?:税后|税前)?\s*(\d{2,})\s*(?!%)/,
-    // 普通数字（带小数点）
-    /(\d+\.?\d*)/,
+    // 不带百分号，数字在合理范围（如1.5, 1.50, 2.3等），直接返回
+    /(\d{1,2}\.?\d*)/,
   ];
 
   for (const pattern of patterns) {
     const match = text.match(pattern);
     if (match) {
       let value = parseFloat(match[1]);
-      // 如果数值大于等于100，认为是 BP 形式（如 150 表示 1.50%），自动除以100
+      // 如果数值>=100，认为是BP形式（如150表示1.50%），自动除以100
       if (value >= 100) {
         value = value / 100;
       }
