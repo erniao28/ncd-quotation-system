@@ -1,17 +1,36 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { GroupedQuotation } from '../types';
 
 interface VisualCardProps {
   groupedQuotes: GroupedQuotation[];
+  onEditMaturity?: (tenor: string, date: string, weekday: string) => void;
 }
 
-export const VisualCard: React.FC<VisualCardProps> = ({ groupedQuotes }) => {
+export const VisualCard: React.FC<VisualCardProps> = ({ groupedQuotes, onEditMaturity }) => {
+  const [editingTenor, setEditingTenor] = useState<string | null>(null);
+  const [editDate, setEditDate] = useState('');
+  const [editWeekday, setEditWeekday] = useState('');
+
+  const handleEditClick = (tenor: string, date: string, weekday: string) => {
+    setEditingTenor(tenor);
+    setEditDate(date);
+    setEditWeekday(weekday);
+  };
+
+  const handleSave = () => {
+    if (editingTenor && onEditMaturity) {
+      onEditMaturity(editingTenor, editDate, editWeekday);
+    }
+    setEditingTenor(null);
+  };
+
   const categories = [
     { key: 'BIG', label: 'AAA(大行&国股)' },
     { key: 'AAA', label: 'AAA(城农商)' },
-    { key: 'AAplus', label: 'AA+' },
-    { key: 'AA_BELOW', label: 'AA及以下' }
+    { key: 'AA+', label: 'AA+' },
+    { key: 'AA', label: 'AA' },
+    { key: 'AA-', label: 'AA-' }
   ];
 
   const tenors = ['1M', '3M', '6M', '9M', '1Y'];
@@ -64,8 +83,54 @@ export const VisualCard: React.FC<VisualCardProps> = ({ groupedQuotes }) => {
                       <div className="flex flex-col items-center">
                         <span className="text-lg font-black text-slate-900">{tenor}</span>
                         <div className="mt-1 text-[8px] text-slate-400 font-bold">
-                          <p>{group?.maturityDate || '--'}</p>
-                          <p>{group?.maturityWeekday || '--'}</p>
+                          {editingTenor === tenor ? (
+                            <div className="flex flex-col gap-1">
+                              <input
+                                type="text"
+                                value={editDate}
+                                onChange={(e) => setEditDate(e.target.value)}
+                                placeholder="日期"
+                                className="w-20 text-[9px] border border-slate-300 rounded px-1"
+                              />
+                              <select
+                                value={editWeekday}
+                                onChange={(e) => setEditWeekday(e.target.value)}
+                                className="w-20 text-[9px] border border-slate-300 rounded px-1"
+                              >
+                                <option value="">星期</option>
+                                <option value="周一">周一</option>
+                                <option value="周二">周二</option>
+                                <option value="周三">周三</option>
+                                <option value="周四">周四</option>
+                                <option value="周五">周五</option>
+                              </select>
+                              <div className="flex gap-1">
+                                <button
+                                  onClick={handleSave}
+                                  className="flex-1 text-[8px] bg-emerald-500 text-white rounded px-1"
+                                >
+                                  保存
+                                </button>
+                                <button
+                                  onClick={() => setEditingTenor(null)}
+                                  className="flex-1 text-[8px] bg-slate-300 text-slate-700 rounded px-1"
+                                >
+                                  取消
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              <p>{group?.maturityDate || '--'}</p>
+                              <p>{group?.maturityWeekday || '--'}</p>
+                              <button
+                                onClick={() => handleEditClick(tenor, group?.maturityDate || '', group?.maturityWeekday || '')}
+                                className="mt-1 text-[8px] text-indigo-500 hover:text-indigo-700 font-bold"
+                              >
+                                编辑
+                              </button>
+                            </>
+                          )}
                         </div>
                       </div>
                     </td>

@@ -42,6 +42,14 @@ async function deleteQuotation(id) {
   return res.json();
 }
 
+async function deleteAllQuotations() {
+  const res = await fetch(`${API_BASE}/quotations`, {
+    method: 'DELETE'
+  });
+  if (!res.ok) throw new Error('清空报价失败');
+  return res.json();
+}
+
 async function fetchMaturities() {
   const res = await fetch(`${API_BASE}/maturities`);
   if (!res.ok) throw new Error('获取期限配置失败');
@@ -148,6 +156,7 @@ export {
   addQuotation,
   updateQuotation,
   deleteQuotation,
+  deleteAllQuotations,
   fetchMaturities,
   updateMaturities
 };

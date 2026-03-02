@@ -148,10 +148,12 @@ function findBank(text: string): string | null {
 }
 
 const RATING_KEYWORDS: Record<string, string[]> = {
-  'AAA': ['AAA', 'aaa', 'ＡＡＡ', '3A'],
-  'AA+': ['AA+', 'aa+', 'ＡＡ＋', 'AAplus', 'AAplus', 'AA+'],
-  'AA': ['AA', 'aa', 'ＡＡ'],
-  'AA-': ['AA-', 'aa-', 'ＡＡ－']
+  'AAA': ['AAA', 'aaa', '3A'],
+  'AA+': ['AA+', 'aa+', 'AAplus'],
+  'AA': ['AA', 'aa'],
+  'AA-': ['AA-', 'aa-'],
+  'A+': ['A+', 'a+'],
+  'A': ['A', 'a']
 };
 
 const TENOR_KEYWORDS: Record<string, string[]> = {
@@ -176,8 +178,13 @@ function getCategory(bankName: string): string {
 }
 
 function findRating(text: string): string {
-  // 先精确匹配
-  for (const [rating, keywords] of Object.entries(RATING_KEYWORDS)) {
+  // 按顺序匹配：先匹配更具体的（带 +/- 的），再匹配一般的
+  // 这样可以避免 "AA+" 被误匹配为 "AA" 或 "AAA"
+  const priorityOrder = ['AA+', 'AA-', 'AAA', 'AA', 'A+', 'A'];
+
+  for (const rating of priorityOrder) {
+    const keywords = RATING_KEYWORDS[rating];
+    if (!keywords) continue;
     for (const keyword of keywords) {
       if (text.includes(keyword)) {
         return rating;
@@ -239,7 +246,7 @@ function findYieldRate(text: string): string {
       if (value >= 100) {
         value = value / 100;
       }
-      return value.toFixed(2);
+      return parseFloat(value.toFixed(4)).toString();
     }
   }
   return '';
@@ -319,63 +326,102 @@ export function parseQuotations(text: string, defaultWeekday: string = '周一')
   // 按行、逗号、分号分割
   const lines = text.split(/[\n,，;；]+/).filter(line => line.trim());
 
+  // 第一步：先扫描整段文本找到银行名（可能在任意位置）
+  let foundBankName = '';
+  for (const line of lines) {
+    // 先检查整行是否有银行名
+    const bankInLine = findBank(line);
+    if (bankInLine) {
+      foundBankName = bankInLine;
+      break;
+    }
+    // 检查每行的最后一个词
+    const words = line.trim().split(/\s+/);
+    if (words.length > 0) {
+      const lastWord = words[words.length - 1];
+      const bank = findBank(lastWord);
+      if (bank) {
+        foundBankName = bank;
+        break;
+      }
+    }
+    // 也检查每行的第一个词
+    if (words.length > 0) {
+      const firstWord = words[0];
+      const bank = findBank(firstWord);
+      if (bank) {
+        foundBankName = bank;
+        break;
+      }
+    }
+  }
+
   const results = [];
-  let lastBankName = ''; // 记录上一个银行名，用于继承
+  const bankName = foundBankName; // 整段统一用这个银行名
 
   for (const line of lines) {
-    const trimmed = line.trim();
+    let trimmed = line.trim();
     if (trimmed.length < 1) continue;
 
-    // 1. 先提取银行名
-    const bankInLine = findBank(trimmed) || extractBankName(trimmed);
-    let currentBankName = bankInLine;
-    if (currentBankName) {
-      lastBankName = currentBankName;
-    }
+    // 去掉日期和时间（如 2026/02/26, 10:30, 上午, 下午 等）
+    trimmed = trimmed.replace(/\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2}/g, ''); // 日期
+    trimmed = trimmed.replace(/\d{1,2}:\d{2}/g, ''); // 时间
+    trimmed = trimmed.replace(/(上午|下午|早上|晚上|中午)/g, ''); // 时段发言
+    trimmed = trimmed.trim();
+    if (!trimmed) continue;
 
-    // 2. 去掉银行名后，提取期限+收益率的组合
+    // 去掉银行名（无论是开头还是结尾）
     let textToParse = trimmed;
-    if (currentBankName && trimmed.includes(currentBankName)) {
-      textToParse = trimmed.replace(currentBankName, '').trim();
+    if (bankName && trimmed.includes(bankName)) {
+      textToParse = trimmed.replace(bankName, '').trim();
+    } else {
+      // 也尝试去掉简称
+      const bankShortNames: Record<string, string> = {
+        '交通银行': '交通', '工商银行': '工行', '建设银行': '建行',
+        '农业银行': '农行', '中国银行': '中行', '招商银行': '招行', '邮储银行': '邮储'
+      };
+      const shortName = bankShortNames[bankName];
+      if (shortName && trimmed.includes(shortName)) {
+        textToParse = trimmed.replace(shortName, '').trim();
+      }
     }
 
-    // 用正则同时匹配期限和收益率：支持有空格和无空格
-    // 3M1.5, 3M 1.5, 3M1.50, 3M 150, 3M1.5% 等
-    const tenorYieldPattern = /(1M|3M|6M|9M|1Y|1m|3m|6m|9m|1y)\s*(\d{1,2}\.?\d{0,2}%?)/gi;
+    // 去掉 "-" 等无意义字符，只保留期限+收益率
+    textToParse = textToParse.replace(/^-\s*|\s+-\s*$/g, '').trim();
+    // 过滤掉只有期限没有收益率的行（如 "1M -" 或只有 "1M"）
+    const pureTenorPattern = /^(1M|3M|6M|9M|1Y|1m|3m|6m|9m|1y)\s*$/i;
+    if (pureTenorPattern.test(textToParse)) continue;
+    if (!textToParse) continue;
+
+    // 用正则同时匹配期限和收益率
+    const tenorYieldPattern = /(1M|3M|6M|9M|1Y|1m|3m|6m|9m|1y)\s*(\d+\.?\d*%?)/gi;
     let match;
     const foundQuotes: any[] = [];
 
     while ((match = tenorYieldPattern.exec(textToParse)) !== null) {
       let tenor = match[1].toUpperCase();
-      // 统一期限格式
-      if (tenor === '1M') tenor = '1M';
-      if (tenor === '3M') tenor = '3M';
-      if (tenor === '6M') tenor = '6M';
-      if (tenor === '9M') tenor = '9M';
       if (tenor === '1Y' || tenor === '1YEAR') tenor = '1Y';
 
       let yieldRate = match[2];
-      // 处理收益率：1.5 -> 1.50%, 150 -> 150(如果带%), 否则保持
-      // 如果没有百分号且数值>=100，认为是BP形式(如150=1.50%)
       if (!yieldRate.includes('%')) {
         const num = parseFloat(yieldRate);
         if (num >= 100) {
-          yieldRate = (num / 100).toFixed(2);
+          yieldRate = parseFloat((num / 100).toFixed(4)).toString();
         } else {
-          yieldRate = num.toFixed(2);
+          yieldRate = parseFloat(num.toFixed(4)).toString();
         }
       }
 
       foundQuotes.push({ tenor, yieldRate });
     }
 
-    // 3. 如果找到期限+收益率，生成报价
+    // 如果找到期限+收益率，生成报价
     if (foundQuotes.length > 0) {
       for (const q of foundQuotes) {
         results.push({
-          bankName: currentBankName || lastBankName || '',
+          bankName: bankName || '',
           rating: 'AAA',
-          category: getCategory(currentBankName || lastBankName || ''),
+          category: getCategory(bankName || ''),
           tenor: q.tenor,
           yieldRate: q.yieldRate,
           volume: '',
@@ -383,27 +429,13 @@ export function parseQuotations(text: string, defaultWeekday: string = '周一')
         });
       }
     } else {
-      // 4. 如果没找到，用原来的方式解析整行
+      // 如果没找到，用原来的方式解析整行
       const parsed = parseQuotation(trimmed, defaultWeekday);
       if (parsed) {
-        if (parsed.bankName && parsed.bankName !== '未知银行') {
-          lastBankName = parsed.bankName;
-          currentBankName = parsed.bankName;
-        } else if (lastBankName && (parsed.tenor || parsed.yieldRate)) {
-          parsed.bankName = lastBankName;
-          parsed.category = getCategory(lastBankName);
-        }
-        results.push(parsed);
-      } else if (lastBankName) {
-        // 如果完全没有解析出任何信息，但有银行名，也返回一行
         results.push({
-          bankName: lastBankName,
-          rating: 'AAA',
-          category: getCategory(lastBankName),
-          tenor: '',
-          yieldRate: '',
-          volume: '',
-          weekday: defaultWeekday
+          ...parsed,
+          bankName: bankName || parsed.bankName,
+          category: getCategory(bankName || parsed.bankName)
         });
       }
     }

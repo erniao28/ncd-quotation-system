@@ -11,6 +11,7 @@ import {
   addQuotation,
   updateQuotation as updateQuotationApi,
   deleteQuotation as deleteQuotationApi,
+  deleteAllQuotations,
   fetchMaturities,
   updateMaturities,
   emitQuotationAdd,
@@ -31,12 +32,42 @@ const App: React.FC = () => {
   const [filterTenor, setFilterTenor] = useState('ALL');
   const [filterRating, setFilterRating] = useState('ALL');
   const [sortOrder, setSortOrder] = useState<'ASC' | 'DESC'>('DESC');
+  const [sortBy, setSortBy] = useState<'YIELD' | 'TIME'>('YIELD');
 
-  const [activeTab, setActiveTab] = useState<'VISUAL' | 'TEXT'>('VISUAL');
+  // 单条列表视图的排序
+  const [listSortBy, setListSortBy] = useState<'TIME' | 'YIELD'>('TIME');
+  const [listSortOrder, setListSortOrder] = useState<'ASC' | 'DESC'>('DESC');
+
+  const [activeTab, setActiveTab] = useState<'VISUAL' | 'TEXT' | 'LIST'>('VISUAL');
   const [copyFeedback, setCopyFeedback] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [selectedQuotes, setSelectedQuotes] = useState<Set<string>>(new Set());
   const [copySuccessMsg, setCopySuccessMsg] = useState('');
+
+  // 拖动多选功能
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragMode, setDragMode] = useState<'select' | 'deselect'>('select');
+
+  // 撤销功能的历史记录
+  const [history, setHistory] = useState<Quotation[][]>([]);
+
+  // 添加历史记录
+  const pushHistory = (quotes: Quotation[]) => {
+    setHistory(prev => {
+      const newHistory = [...prev, JSON.parse(JSON.stringify(quotes))];
+      // 只保留最近 10 步
+      if (newHistory.length > 10) newHistory.shift();
+      return newHistory;
+    });
+  };
+
+  // 撤销上一步
+  const handleUndo = () => {
+    if (history.length === 0) return;
+    const previousState = history[history.length - 1];
+    setAllQuotes(previousState);
+    setHistory(prev => prev.slice(0, -1));
+  };
 
   // 初始化数据加载和 WebSocket
   useEffect(() => {
@@ -150,6 +181,9 @@ const App: React.FC = () => {
     const updatedQuotes = [...allQuotes];
     let skippedCount = 0;
 
+    // 推入历史记录
+    pushHistory(allQuotes);
+
     for (const newPart of recognizedQuotes) {
       // 跳过没有银行名或没有收益率的项
       if (!newPart.bankName || !newPart.yieldRate) {
@@ -167,7 +201,7 @@ const App: React.FC = () => {
         q.bankName === newPart.bankName && q.tenor === newPart.tenor
       );
 
-      let finalYield = `${newRateVal.toFixed(2)}%`;
+      let finalYield = `${parseFloat(newRateVal.toFixed(4)).toString()}%`;
 
       if (existingIdx > -1) {
         const oldRateVal = parseFloat(updatedQuotes[existingIdx].yieldRate.replace(/[^\d.]/g, ''));
@@ -240,7 +274,32 @@ const App: React.FC = () => {
     }
   };
 
+  // 手动更新到期日（批量更新所有相同期限的报价）
+  const handleUpdateMaturity = async (tenor: string, date: string, weekday: string) => {
+    // 更新所有相同期限的报价
+    const updatedQuotes = allQuotes.map(q =>
+      q.tenor === tenor ? { ...q, maturityDate: date, maturityWeekday: weekday } : q
+    );
+    setAllQuotes(updatedQuotes);
+
+    // 批量更新后端
+    try {
+      for (const quote of updatedQuotes.filter(q => q.tenor === tenor)) {
+        await updateQuotationApi(quote.id, {
+          maturityDate: date,
+          maturityWeekday: weekday
+        });
+        emitQuotationUpdate(quote);
+      }
+    } catch (error) {
+      console.error('批量更新到期日失败:', error);
+    }
+  };
+
   const handleDeleteQuote = async (id: string) => {
+    // 推入历史记录
+    pushHistory(allQuotes);
+
     // 先本地更新
     setAllQuotes(prev => prev.filter(q => q.id !== id));
 
@@ -258,30 +317,137 @@ const App: React.FC = () => {
     let result = [...allQuotes];
     if (searchTerm) result = result.filter(q => q.bankName.includes(searchTerm));
     if (filterTenor !== 'ALL') result = result.filter(q => q.tenor === filterTenor);
-    if (filterRating !== 'ALL') result = result.filter(q => q.rating === filterRating);
+    if (filterRating !== 'ALL') {
+      // BIG 筛选的是 category，其他筛选的是 rating
+      if (filterRating === 'BIG') {
+        result = result.filter(q => q.category === 'BIG');
+      } else {
+        result = result.filter(q => q.rating === filterRating);
+      }
+    }
 
+    // 排序逻辑
     result.sort((a, b) => {
-      const valA = parseFloat(a.yieldRate.replace(/[^\d.]/g, '')) || 0;
-      const valB = parseFloat(b.yieldRate.replace(/[^\d.]/g, '')) || 0;
-      return sortOrder === 'ASC' ? valA - valB : valB - valA;
+      if (sortBy === 'TIME') {
+        // 按更新时间排序
+        const timeA = a.updatedAt || a.createdAt || 0;
+        const timeB = b.updatedAt || b.createdAt || 0;
+        return sortOrder === 'ASC' ? timeA - timeB : timeB - timeA;
+      } else {
+        // 按收益率排序
+        const valA = parseFloat(a.yieldRate.replace(/[^\d.]/g, '')) || 0;
+        const valB = parseFloat(b.yieldRate.replace(/[^\d.]/g, '')) || 0;
+        return sortOrder === 'ASC' ? valA - valB : valB - valA;
+      }
     });
     return result;
-  }, [allQuotes, searchTerm, filterTenor, filterRating, sortOrder]);
+  }, [allQuotes, searchTerm, filterTenor, filterRating, sortOrder, sortBy]);
+
+  // 手动刷新函数
+  const handleRefresh = async () => {
+    try {
+      const [quotes, mats] = await Promise.all([
+        fetchQuotations(),
+        fetchMaturities()
+      ]);
+      setAllQuotes(quotes);
+      setMaturities(mats);
+    } catch (error) {
+      console.error('刷新失败:', error);
+      alert('刷新失败，请检查网络连接');
+    }
+  };
+
+  // 单条列表视图的排序
+  const sortedListQuotes = useMemo(() => {
+    let result = [...allQuotes];
+    // 筛选
+    if (searchTerm) result = result.filter(q => q.bankName.includes(searchTerm));
+    if (filterTenor !== 'ALL') result = result.filter(q => q.tenor === filterTenor);
+    if (filterRating !== 'ALL') {
+      // BIG 筛选的是 category，其他筛选的是 rating
+      if (filterRating === 'BIG') {
+        result = result.filter(q => q.category === 'BIG');
+      } else {
+        result = result.filter(q => q.rating === filterRating);
+      }
+    }
+
+    // 排序
+    result.sort((a, b) => {
+      if (listSortBy === 'TIME') {
+        const timeA = a.updatedAt || a.createdAt || 0;
+        const timeB = b.updatedAt || b.createdAt || 0;
+        return listSortOrder === 'ASC' ? timeA - timeB : timeB - timeA;
+      } else {
+        const valA = parseFloat(a.yieldRate.replace(/[^\d.]/g, '')) || 0;
+        const valB = parseFloat(b.yieldRate.replace(/[^\d.]/g, '')) || 0;
+        return listSortOrder === 'ASC' ? valA - valB : valB - valA;
+      }
+    });
+
+    return result;
+  }, [allQuotes, searchTerm, filterTenor, filterRating, listSortBy, listSortOrder]);
 
   const groupedQuotes = useMemo(() => {
     const groups: Record<string, GroupedQuotation> = {};
     const tenorOrder = ['1M', '3M', '6M', '9M', '1Y'];
+    const ratingOrder: Record<string, number> = { 'BIG': 0, 'AAA': 1, 'AA+': 2, 'AA': 3, 'AA-': 4 };
+
     filteredQuotes.forEach(q => {
       if (!groups[q.tenor]) {
         groups[q.tenor] = { tenor: q.tenor, maturityDate: q.maturityDate, maturityWeekday: q.maturityWeekday, items: [] };
       }
       groups[q.tenor].items.push(q);
     });
+
+    // 每个期限内排序：类别 > 收益率 DESC > 时间 DESC
+    Object.values(groups).forEach(group => {
+      group.items.sort((a, b) => {
+        // 1. 先按类别排序
+        const ratingA = ratingOrder[a.category] ?? 99;
+        const ratingB = ratingOrder[b.category] ?? 99;
+        if (ratingA !== ratingB) return ratingA - ratingB;
+
+        // 2. 同类别按收益率降序
+        const yieldA = parseFloat(a.yieldRate.replace(/[^\d.]/g, '')) || 0;
+        const yieldB = parseFloat(b.yieldRate.replace(/[^\d.]/g, '')) || 0;
+        if (yieldA !== yieldB) return yieldB - yieldA;
+
+        // 3. 收益率相同按时间降序（新的在前）
+        const timeA = a.updatedAt || a.createdAt || 0;
+        const timeB = b.updatedAt || b.createdAt || 0;
+        return timeB - timeA;
+      });
+    });
+
     return tenorOrder.map(t => groups[t]).filter(Boolean);
   }, [filteredQuotes]);
 
   const exportText = useMemo(() => {
-    return groupedQuotes.map(g => {
+    // 按评级排序：大行 > AAA > AA+ > AA > AA-
+    const ratingOrder: Record<string, number> = {
+      'BIG': 0,
+      'AAA': 1,
+      'AA+': 2,
+      'AA': 3,
+      'AA-': 4
+    };
+
+    const sortedGroupedQuotes = groupedQuotes.map(g => {
+      const sortedItems = [...g.items].sort((a, b) => {
+        const ratingA = ratingOrder[a.category] ?? 99;
+        const ratingB = ratingOrder[b.category] ?? 99;
+        if (ratingA !== ratingB) return ratingA - ratingB;
+        // 同评级按收益率排序
+        const yieldA = parseFloat(a.yieldRate.replace(/[^\d.]/g, '')) || 0;
+        const yieldB = parseFloat(b.yieldRate.replace(/[^\d.]/g, '')) || 0;
+        return yieldA - yieldB;
+      });
+      return { ...g, items: sortedItems };
+    });
+
+    return sortedGroupedQuotes.map(g => {
       const header = `(${g.tenor} 到期日 ${g.maturityDate} ${g.maturityWeekday})`;
       const rows = g.items.map(i => {
         const vol = i.volume ? `${i.volume}` : '';
@@ -290,6 +456,25 @@ const App: React.FC = () => {
       return `${header}\n${rows}`;
     }).join('\n\n');
   }, [groupedQuotes]);
+
+  // 复制文本到剪贴板（兼容方法）
+  const copyToClipboard = (text: string): boolean => {
+    // 方法1：现代API
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(() => true).catch(() => false);
+      return true;
+    }
+    // 方法2：兼容方法
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    const success = document.execCommand('copy');
+    document.body.removeChild(textarea);
+    return success;
+  };
 
   // 复制选中报价的函数
   const handleCopySelected = () => {
@@ -304,14 +489,14 @@ const App: React.FC = () => {
     const text = selectedItems.map(i => {
       return `${i.bankName} ${i.rating} ${i.weekday} ${i.tenor} ${i.yieldRate}`;
     }).join('\n');
-    navigator.clipboard.writeText(text);
-    setCopySuccessMsg(`已复制 ${selectedItems.length} 条报价`);
+    const success = copyToClipboard(text);
+    setCopySuccessMsg(success ? `已复制 ${selectedItems.length} 条报价` : '复制失败，请手动复制');
     setTimeout(() => setCopySuccessMsg(''), 2000);
   };
 
   const handleCopyAll = () => {
-    navigator.clipboard.writeText(exportText);
-    setCopyFeedback(true);
+    const success = copyToClipboard(exportText);
+    setCopyFeedback(success);
     setTimeout(() => setCopyFeedback(false), 2000);
   };
 
@@ -326,6 +511,48 @@ const App: React.FC = () => {
       return newSet;
     });
   };
+
+  // 记录拖动开始的复选框 ID
+  const [dragStartId, setDragStartId] = useState<string | null>(null);
+
+  // 拖动选择开始 - 立即切换第一个复选框
+  const handleDragStart = (id: string, isChecked: boolean) => {
+    setDragStartId(id);
+    setIsDragging(true);
+    setDragMode(isChecked ? 'deselect' : 'select');
+    // 立即切换第一个复选框的状态
+    toggleSelect(id);
+  };
+
+  // 拖动经过
+  const handleDragEnter = (id: string) => {
+    if (!isDragging || id === dragStartId) return;
+    setSelectedQuotes(prev => {
+      const newSet = new Set(prev);
+      if (dragMode === 'select') {
+        newSet.add(id);
+      } else {
+        newSet.delete(id);
+      }
+      return newSet;
+    });
+  };
+
+  // 拖动结束 - 不再切换状态，因为开始时已经切换过了
+  const handleDragEnd = (id: string) => {
+    setIsDragging(false);
+    setDragStartId(null);
+  };
+
+  // 全局鼠标抬起事件，结束拖动
+  useEffect(() => {
+    const handleGlobalMouseUp = () => {
+      setIsDragging(false);
+      setDragStartId(null);
+    };
+    window.addEventListener('mouseup', handleGlobalMouseUp);
+    return () => window.removeEventListener('mouseup', handleGlobalMouseUp);
+  }, []);
 
   const selectAll = () => {
     if (selectedQuotes.size === filteredQuotes.length) {
@@ -346,6 +573,14 @@ const App: React.FC = () => {
           </span>
         </div>
         <div className="flex gap-3">
+          <button
+            onClick={handleUndo}
+            disabled={history.length === 0}
+            className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${history.length > 0 ? 'bg-orange-500 text-white hover:bg-orange-600' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}
+            title="撤销上一步操作"
+          >
+            ↶ 撤销
+          </button>
           <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">起息周几:</span>
             <input value={valueWeekday} onChange={e => setValueWeekday(e.target.value)} className="bg-transparent w-8 text-indigo-600 font-bold border-none outline-none text-sm text-center" />
@@ -471,7 +706,7 @@ const App: React.FC = () => {
                         <label className="text-[10px] text-slate-500">类别</label>
                         <select
                           className="bg-slate-700 text-white text-sm px-2 py-1 rounded outline-none focus:ring-1 focus:ring-indigo-500"
-                          value={q.category || 'AAA'}
+                          value={q.category || 'BIG'}
                           onChange={(e) => {
                             const newQuotes = [...recognizedQuotes];
                             newQuotes[i] = { ...newQuotes[i], category: e.target.value };
@@ -480,6 +715,9 @@ const App: React.FC = () => {
                         >
                           <option value="BIG">大行</option>
                           <option value="AAA">AAA</option>
+                          <option value="AA+">AA+</option>
+                          <option value="AA">AA</option>
+                          <option value="AA-">AA-</option>
                         </select>
                       </div>
                       {/* 星期 */}
@@ -536,6 +774,7 @@ const App: React.FC = () => {
                <div className="flex bg-slate-100 p-1 rounded-xl">
                  <button onClick={() => setActiveTab('VISUAL')} className={`px-6 py-2 rounded-lg text-xs font-bold transition-all ${activeTab === 'VISUAL' ? 'bg-white shadow text-slate-900' : 'text-slate-400'}`}>看板视图</button>
                  <button onClick={() => setActiveTab('TEXT')} className={`px-6 py-2 rounded-lg text-xs font-bold transition-all ${activeTab === 'TEXT' ? 'bg-white shadow text-slate-900' : 'text-slate-400'}`}>文字版</button>
+                 <button onClick={() => setActiveTab('LIST')} className={`px-6 py-2 rounded-lg text-xs font-bold transition-all ${activeTab === 'LIST' ? 'bg-white shadow text-slate-900' : 'text-slate-400'}`}>单条更新</button>
                </div>
 
                <div className="flex flex-wrap gap-2 items-center">
@@ -551,17 +790,35 @@ const App: React.FC = () => {
                  </select>
                  <select value={filterRating} onChange={e => setFilterRating(e.target.value)} className="bg-slate-50 border border-slate-200 px-2 py-2 rounded-xl text-xs">
                     <option value="ALL">评级</option>
-                    <option value="AAA">AAA</option><option value="AA+">AA+</option>
+                    <option value="BIG">大行</option>
+                    <option value="AAA">AAA</option>
+                    <option value="AA+">AA+</option>
+                    <option value="AA">AA</option>
+                    <option value="AA-">AA-</option>
                  </select>
-                 <button onClick={() => setSortOrder(o => o === 'ASC' ? 'DESC' : 'ASC')} className="p-2 bg-slate-50 border border-slate-200 rounded-xl hover:bg-slate-100 transition-colors">
+                 <select
+                  value={sortBy}
+                  onChange={e => setSortBy(e.target.value as 'YIELD' | 'TIME')}
+                  className="bg-slate-50 border border-slate-200 px-2 py-2 rounded-xl text-xs"
+                  title="排序方式"
+                 >
+                    <option value="YIELD">收益率排序</option>
+                    <option value="TIME">时间排序</option>
+                 </select>
+                 <button onClick={() => setSortOrder(o => o === 'ASC' ? 'DESC' : 'ASC')} className="p-2 bg-slate-50 border border-slate-200 rounded-xl hover:bg-slate-100 transition-colors" title="倒序/正序">
                     <svg className={`w-4 h-4 text-slate-500 transition-transform ${sortOrder === 'ASC' ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7" strokeWidth="2" /></svg>
+                 </button>
+                 <button onClick={handleRefresh} className="p-2 bg-indigo-50 border border-indigo-200 rounded-xl hover:bg-indigo-100 transition-colors" title="刷新数据">
+                    <svg className="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
                  </button>
                </div>
             </div>
 
-            {activeTab === 'VISUAL' ? (
-              <VisualCard groupedQuotes={groupedQuotes} />
-            ) : (
+            {activeTab === 'VISUAL' && (
+              <VisualCard groupedQuotes={groupedQuotes} onEditMaturity={handleUpdateMaturity} />
+            )}
+
+            {activeTab === 'TEXT' && (
               <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 flex-1 flex flex-col">
                 <div className="flex justify-between items-center mb-6">
                   <div className="flex items-center gap-4">
@@ -570,7 +827,7 @@ const App: React.FC = () => {
                       {selectedQuotes.size === filteredQuotes.length ? '取消全选' : '全选'}
                     </button>
                   </div>
-                  <button onClick={() => {if(confirm('清空所有？')) setAllQuotes([])}} className="text-[10px] font-bold text-red-400 hover:text-red-600 uppercase">Clear All</button>
+                  <button onClick={async () => {if(confirm('清空所有？')) {await deleteAllQuotations(); setAllQuotes([]);}}} className="text-[10px] font-bold text-red-400 hover:text-red-600 uppercase">Clear All</button>
                 </div>
                 <div className="space-y-8 flex-1">
                   {groupedQuotes.map((group, idx) => (
@@ -605,7 +862,7 @@ const App: React.FC = () => {
                             <button
                               onClick={() => {
                                 const text = `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}`;
-                                navigator.clipboard.writeText(text);
+                                copyToClipboard(text);
                                 setCopySuccessMsg('已复制');
                                 setTimeout(() => setCopySuccessMsg(''), 1500);
                               }}
@@ -621,6 +878,93 @@ const App: React.FC = () => {
                     </div>
                   ))}
                   {groupedQuotes.length === 0 && <div className="text-center text-slate-300 py-20 italic">暂无报价数据</div>}
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'LIST' && (
+              <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 flex-1 flex flex-col">
+                <div className="flex justify-between items-center mb-6">
+                  <div className="flex items-center gap-4">
+                    <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">单条价格更新 (实时)</h3>
+                    <button onClick={selectAll} className="text-[10px] font-bold text-indigo-400 hover:text-indigo-600">
+                      {selectedQuotes.size === sortedListQuotes.length ? '取消全选' : '全选'}
+                    </button>
+                  </div>
+                  <div className="flex gap-2">
+                    <select
+                      value={listSortBy}
+                      onChange={e => setListSortBy(e.target.value as 'TIME' | 'YIELD')}
+                      className="bg-white border border-slate-200 px-2 py-1.5 rounded-lg text-xs font-bold"
+                    >
+                      <option value="TIME">按时间</option>
+                      <option value="YIELD">按收益率</option>
+                    </select>
+                    <button
+                      onClick={() => setListSortOrder(o => o === 'ASC' ? 'DESC' : 'ASC')}
+                      className="p-2 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors"
+                      title="倒序/正序"
+                    >
+                      <svg className={`w-4 h-4 text-slate-500 transition-transform ${listSortOrder === 'ASC' ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7" strokeWidth="2" /></svg>
+                    </button>
+                    <button onClick={async () => {if(confirm('清空所有？')) {await deleteAllQuotations(); setAllQuotes([]);}}} className="text-[10px] font-bold text-red-400 hover:text-red-600 uppercase">Clear All</button>
+                  </div>
+                </div>
+                <div className="space-y-2 flex-1 overflow-y-auto">
+                  {sortedListQuotes.map((item, idx) => {
+                    const isSelected = selectedQuotes.has(item.id);
+                    return (
+                      <div key={item.id} className={`flex flex-wrap gap-2 items-center group py-2 px-3 rounded-lg transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}>
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={(e) => e.preventDefault()}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            handleDragStart(item.id, isSelected);
+                          }}
+                          onMouseEnter={() => handleDragEnter(item.id)}
+                          onMouseUp={(e) => {
+                            e.preventDefault();
+                            handleDragEnd(item.id);
+                          }}
+                          className={`w-4 h-4 text-indigo-600 rounded cursor-pointer ${isDragging ? 'select-none' : ''}`}
+                          title="单击选中，或按住鼠标拖动批量选择"
+                        />
+                        <span className="text-[10px] text-slate-400 font-mono w-16">{new Date(item.updatedAt || item.createdAt || Date.now()).toLocaleTimeString('zh-CN', {hour12:false, hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>
+                        <input
+                          className="w-28 font-bold bg-transparent border-none focus:bg-white outline-none p-0 text-slate-900"
+                          value={item.bankName}
+                          onChange={e => handleUpdateQuote(item.id, 'bankName', e.target.value)}
+                        />
+                        <input className="w-10 text-slate-400 text-xs bg-transparent" value={item.rating} onChange={e => handleUpdateQuote(item.id, 'rating', e.target.value)} />
+                        <span className={`w-12 text-[10px] px-1.5 py-0.5 rounded font-bold ${item.category === 'BIG' ? 'bg-red-100 text-red-600' : item.category === 'AAA' ? 'bg-orange-100 text-orange-600' : 'bg-slate-100 text-slate-600'}`}>{item.category === 'BIG' ? '大行' : item.category}</span>
+                        <input className="w-8 text-slate-400 text-xs bg-transparent" value={item.weekday} onChange={e => handleUpdateQuote(item.id, 'weekday', e.target.value)} />
+                        <input className="w-16 text-slate-400 text-xs bg-transparent" value={item.tenor} onChange={e => handleUpdateQuote(item.id, 'tenor', e.target.value)} />
+                        <input
+                          className={`w-20 font-bold text-right outline-none bg-transparent ${item.yieldRate.includes('↑') ? 'text-red-600' : item.yieldRate.includes('↓') ? 'text-emerald-600' : 'text-blue-600'}`}
+                          value={item.yieldRate}
+                          onChange={e => handleUpdateQuote(item.id, 'yieldRate', e.target.value)}
+                        />
+                        <input className="w-12 text-slate-400 text-xs text-center" value={item.volume} placeholder="量" onChange={e => handleUpdateQuote(item.id, 'volume', e.target.value)} />
+                        <input className="flex-1 text-slate-400 italic text-xs truncate" value={item.remarks} placeholder="备注" onChange={e => handleUpdateQuote(item.id, 'remarks', e.target.value)} />
+                        <button
+                          onClick={() => {
+                            const text = `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}`;
+                            copyToClipboard(text);
+                            setCopySuccessMsg('已复制');
+                            setTimeout(() => setCopySuccessMsg(''), 1500);
+                          }}
+                          className="opacity-0 group-hover:opacity-100 text-blue-300 hover:text-blue-500 transition-all text-xs font-bold"
+                          title="复制此行"
+                        >
+                          复制
+                        </button>
+                        <button onClick={() => handleDeleteQuote(item.id)} className="opacity-0 group-hover:opacity-100 text-red-300 hover:text-red-500 transition-all text-xs font-bold">删除</button>
+                      </div>
+                    );
+                  })}
+                  {sortedListQuotes.length === 0 && <div className="text-center text-slate-300 py-20 italic">暂无报价数据</div>}
                 </div>
               </div>
             )}
