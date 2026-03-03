@@ -19,6 +19,7 @@ import {
   emitQuotationDelete,
   emitMaturityUpdate
 } from './services/api';
+import html2canvas from 'html2canvas';
 
 const App: React.FC = () => {
   const [inputText, setInputText] = useState('');
@@ -27,6 +28,7 @@ const App: React.FC = () => {
   const [recognizedQuotes, setRecognizedQuotes] = useState<Partial<Quotation>[]>([]);
   const [allQuotes, setAllQuotes] = useState<Quotation[]>([]);
   const [maturities, setMaturities] = useState<MaturityInfo[]>([]);
+  const [recognizedMaturities, setRecognizedMaturities] = useState<{ tenor: string; date: string; weekday: string }[]>([]);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [filterTenor, setFilterTenor] = useState('ALL');
@@ -142,22 +144,40 @@ const App: React.FC = () => {
     if (!maturityInput.trim()) return;
     try {
       const results = await parseMaturityDates(maturityInput);
-      setMaturities(results);
-
-      // 更新数据库
-      await updateMaturities(results);
-
-      // 广播给其他用户
-      emitMaturityUpdate(results);
-
-      setAllQuotes(prev => prev.map(q => {
-        const mat = results.find(m => m.tenor === q.tenor);
-        return mat ? { ...q, maturityDate: mat.date, maturityWeekday: mat.weekday } : q;
-      }));
+      if (results.length === 0) {
+        alert('未识别到有效的期限和日期格式');
+        return;
+      }
+      // 显示解析结果，让用户确认
+      setRecognizedMaturities(results);
     } catch (e: any) {
       console.error("同步失败详情:", e);
-      alert('到期日同步失败，请检查 API Key 是否配置或网络是否通畅。');
+      alert('到期日解析失败，请检查输入格式。');
     }
+  };
+
+  // 确认发布基准日期
+  const handleConfirmMaturity = async () => {
+    if (recognizedMaturities.length === 0) return;
+
+    // 更新本地状态
+    setMaturities(recognizedMaturities);
+
+    // 更新数据库
+    await updateMaturities(recognizedMaturities);
+
+    // 广播给其他用户
+    emitMaturityUpdate(recognizedMaturities);
+
+    // 更新所有报价的到期日
+    setAllQuotes(prev => prev.map(q => {
+      const mat = recognizedMaturities.find(m => m.tenor === q.tenor);
+      return mat ? { ...q, maturityDate: mat.date, maturityWeekday: mat.weekday } : q;
+    }));
+
+    // 清空输入和识别结果
+    setRecognizedMaturities([]);
+    setMaturityInput('');
   };
 
   const handleParse = async () => {
@@ -201,7 +221,18 @@ const App: React.FC = () => {
         q.bankName === newPart.bankName && q.tenor === newPart.tenor
       );
 
-      let finalYield = `${parseFloat(newRateVal.toFixed(4)).toString()}%`;
+      // 格式化为 4 位小数，然后去掉末尾多余的 0，但至少保留 2 位小数
+      let formattedRate = newRateVal.toFixed(4);
+      formattedRate = formattedRate.replace(/(\.\d\d[1-9])0+$|(\.\d\d)0+$/, '$1$2');
+      if (!formattedRate.includes('.')) {
+        formattedRate += '.00';
+      } else {
+        const decimalPart = formattedRate.split('.')[1];
+        if (decimalPart.length < 2) {
+          formattedRate = formattedRate + '0'.repeat(2 - decimalPart.length);
+        }
+      }
+      let finalYield = `${formattedRate}%`;
 
       if (existingIdx > -1) {
         const oldRateVal = parseFloat(updatedQuotes[existingIdx].yieldRate.replace(/[^\d.]/g, ''));
@@ -257,8 +288,34 @@ const App: React.FC = () => {
   };
 
   const handleUpdateQuote = async (id: string, field: keyof Quotation, value: string) => {
+    // 对收益率进行精度处理
+    let finalValue = value;
+    if (field === 'yieldRate') {
+      // 保留涨跌标记
+      const direction = value.includes('↑') ? '↑' : value.includes('↓') ? '↓' : '';
+      const cleanRateStr = value.replace(/[^\d.]/g, '');
+      const rateVal = parseFloat(cleanRateStr);
+      if (!isNaN(rateVal)) {
+        // 格式化为 4 位小数，然后去掉末尾多余的 0，但至少保留 2 位小数
+        let formattedRate = rateVal.toFixed(4);
+        // 去掉末尾多余的 0，但至少保留 2 位小数
+        // 例如：1.5000 -> 1.50, 1.5050 -> 1.505, 1.5005 -> 1.5005
+        formattedRate = formattedRate.replace(/(\.\d\d[1-9])0+$|(\.\d\d)0+$/, '$1$2');
+        // 如果小数点后不足 2 位，补足 2 位
+        if (!formattedRate.includes('.')) {
+          formattedRate += '.00';
+        } else {
+          const decimalPart = formattedRate.split('.')[1];
+          if (decimalPart.length < 2) {
+            formattedRate = formattedRate + '0'.repeat(2 - decimalPart.length);
+          }
+        }
+        finalValue = formattedRate + direction;
+      }
+    }
+
     // 先本地更新
-    setAllQuotes(prev => prev.map(q => q.id === id ? { ...q, [field]: value } : q));
+    setAllQuotes(prev => prev.map(q => q.id === id ? { ...q, [field]: finalValue } : q));
 
     // 获取更新后的数据
     const quote = allQuotes.find(q => q.id === id);
@@ -266,7 +323,7 @@ const App: React.FC = () => {
 
     // 发送到后端
     try {
-      const updated = await updateQuotationApi(id, { [field]: value });
+      const updated = await updateQuotationApi(id, { [field]: finalValue });
       // 广播给其他用户
       emitQuotationUpdate(updated);
     } catch (error) {
@@ -289,8 +346,19 @@ const App: React.FC = () => {
           maturityDate: date,
           maturityWeekday: weekday
         });
+        // 广播更新后的数据（包含新的到期日）
         emitQuotationUpdate(quote);
       }
+      // 同时更新 maturities 配置
+      const updatedMaturities = maturities.map(m =>
+        m.tenor === tenor ? { ...m, date, weekday } : m
+      );
+      // 如果没有该期限的配置，添加新的
+      if (!maturities.some(m => m.tenor === tenor)) {
+        updatedMaturities.push({ tenor, date, weekday });
+      }
+      await updateMaturities(updatedMaturities);
+      emitMaturityUpdate(updatedMaturities);
     } catch (error) {
       console.error('批量更新到期日失败:', error);
     }
@@ -487,7 +555,9 @@ const App: React.FC = () => {
       return;
     }
     const text = selectedItems.map(i => {
-      return `${i.bankName} ${i.rating} ${i.weekday} ${i.tenor} ${i.yieldRate}`;
+      const vol = i.volume ? ` ${i.volume}` : '';
+      const remarks = i.remarks ? ` ${i.remarks}` : '';
+      return `${i.bankName} ${i.rating} ${i.weekday} ${i.tenor} ${i.yieldRate}${vol}${remarks}`.trim();
     }).join('\n');
     const success = copyToClipboard(text);
     setCopySuccessMsg(success ? `已复制 ${selectedItems.length} 条报价` : '复制失败，请手动复制');
@@ -498,6 +568,89 @@ const App: React.FC = () => {
     const success = copyToClipboard(exportText);
     setCopyFeedback(success);
     setTimeout(() => setCopyFeedback(false), 2000);
+  };
+
+  // 复制看板为图片
+  const handleCopyCardAsImage = async () => {
+    const cardElement = document.getElementById('capture-area');
+    if (!cardElement) {
+      alert('未找到可复制的看板');
+      return;
+    }
+
+    try {
+      // 使用 html2canvas 截取图片
+      const canvas = await html2canvas(cardElement, {
+        scale: 2, // 提高清晰度
+        useCORS: true,
+        backgroundColor: '#ffffff'
+      });
+
+      // 转换为 blob 并复制到剪贴板
+      canvas.toBlob(async (blob) => {
+        if (!blob) {
+          alert('图片生成失败');
+          return;
+        }
+
+        try {
+          // 尝试使用现代 API 复制到剪贴板
+          if (navigator.clipboard && navigator.clipboard.write) {
+            const item = new ClipboardItem({ 'image/png': blob });
+            await navigator.clipboard.write([item]);
+            setCopySuccessMsg('已复制看板图片');
+          } else {
+            // 降级方案：下载到本地
+            const link = document.createElement('a');
+            link.download = `ncd-quotation-${Date.now()}.png`;
+            link.href = URL.createObjectURL(blob);
+            link.click();
+            setCopySuccessMsg('已下载看板图片');
+          }
+        } catch (err) {
+          console.error('复制失败:', err);
+          // 降级方案：下载到本地
+          const link = document.createElement('a');
+          link.download = `ncd-quotation-${Date.now()}.png`;
+          link.href = URL.createObjectURL(blob);
+          link.click();
+          setCopySuccessMsg('已下载看板图片到本地');
+        }
+        setTimeout(() => setCopySuccessMsg(''), 2000);
+      }, 'image/png');
+    } catch (error) {
+      console.error('截图失败:', error);
+      alert('复制看板失败：' + error);
+    }
+  };
+
+  // 批量删除选中的报价
+  const handleDeleteSelected = async () => {
+    if (selectedQuotes.size === 0) {
+      alert('请先选择要删除的报价');
+      return;
+    }
+    if (!confirm(`确定要删除选中的 ${selectedQuotes.size} 条报价吗？`)) return;
+
+    // 推入历史记录
+    pushHistory(allQuotes);
+
+    const idsToDelete = Array.from(selectedQuotes);
+
+    // 先本地更新
+    setAllQuotes(prev => prev.filter(q => !selectedQuotes.has(q.id)));
+    setSelectedQuotes(new Set());
+
+    // 批量删除后端数据
+    try {
+      for (const id of idsToDelete) {
+        await deleteQuotationApi(id);
+        emitQuotationDelete(id);
+      }
+    } catch (error) {
+      console.error('批量删除失败:', error);
+      alert('批量删除失败，请检查网络连接');
+    }
   };
 
   const toggleSelect = (id: string) => {
@@ -564,83 +717,169 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
-      <header className="bg-white border-b border-slate-200 px-8 py-4 flex justify-between items-center sticky top-0 z-50 shadow-sm">
-        <div className="flex items-center gap-3">
-          <div className="bg-indigo-600 text-white p-2 rounded-xl font-bold text-xl">NCD.AI</div>
-          <h1 className="text-lg font-bold text-slate-800">专业报价管理系统</h1>
-          <span className={`text-xs px-2 py-1 rounded-full ${isConnected ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-600'}`}>
+      <header className="bg-white border-b border-slate-200 px-6 py-3 flex justify-between items-center sticky top-0 z-50 shadow-sm">
+        <div className="flex items-center gap-2">
+          <div className="bg-indigo-600 text-white p-1.5 rounded-xl font-bold text-lg">NCD.AI</div>
+          <h1 className="text-base font-bold text-slate-800">专业报价管理系统</h1>
+          <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${isConnected ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-600'}`}>
             {isConnected ? '● 已连接' : '○ 未连接'}
           </span>
         </div>
-        <div className="flex gap-3">
+        <div className="flex gap-2">
           <button
             onClick={handleUndo}
             disabled={history.length === 0}
-            className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${history.length > 0 ? 'bg-orange-500 text-white hover:bg-orange-600' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${history.length > 0 ? 'bg-orange-500 text-white hover:bg-orange-600' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}
             title="撤销上一步操作"
           >
             ↶ 撤销
           </button>
-          <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">起息周几:</span>
-            <input value={valueWeekday} onChange={e => setValueWeekday(e.target.value)} className="bg-transparent w-8 text-indigo-600 font-bold border-none outline-none text-sm text-center" />
+          <div className="flex items-center gap-1.5 bg-slate-100 px-2 py-1 rounded-lg border border-slate-200">
+            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">起息周几:</span>
+            <input value={valueWeekday} onChange={e => setValueWeekday(e.target.value)} className="bg-transparent w-6 text-indigo-600 font-bold border-none outline-none text-xs text-center" />
           </div>
-          <button onClick={handleCopySelected} className="px-4 py-2 rounded-xl text-sm font-bold bg-indigo-600 text-white hover:bg-indigo-700 transition-all">
+          <button onClick={handleCopySelected} className="px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-700 transition-all">
             复制选中 ({selectedQuotes.size})
           </button>
-          <button onClick={handleCopyAll} className={`px-4 py-2 rounded-xl text-sm font-bold shadow-lg transition-all ${copyFeedback ? 'bg-emerald-500 text-white' : 'bg-slate-900 text-white hover:bg-slate-800'}`}>
+          <button onClick={handleDeleteSelected} disabled={selectedQuotes.size === 0} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${selectedQuotes.size > 0 ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}>
+            删除选中
+          </button>
+          <button onClick={handleCopyCardAsImage} className="px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-700 transition-all">
+            复制看板图
+          </button>
+          <button onClick={handleCopyAll} className={`px-3 py-1.5 rounded-xl text-xs font-bold shadow-lg transition-all ${copyFeedback ? 'bg-emerald-500 text-white' : 'bg-slate-900 text-white hover:bg-slate-800'}`}>
             {copyFeedback ? '复制成功' : '复制全部'}
           </button>
-          {copySuccessMsg && <span className="text-emerald-500 text-sm font-bold self-center">{copySuccessMsg}</span>}
+          {copySuccessMsg && <span className="text-emerald-500 text-xs font-bold self-center">{copySuccessMsg}</span>}
         </div>
       </header>
 
-      <main className="max-w-[1600px] mx-auto p-8 grid grid-cols-12 gap-8 w-full">
-        <div className="col-span-12 lg:col-span-4 space-y-6">
-          <section className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
-            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-orange-400"></span> 1. 同步到期日
+      <main className="max-w-[1400px] mx-auto p-6 grid grid-cols-12 gap-6 w-full">
+        <div className="col-span-12 lg:col-span-4 space-y-4">
+          <section className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+            <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-orange-400"></span> 1. 同步到期日
             </h2>
             <textarea
               value={maturityInput}
               onChange={e => setMaturityInput(e.target.value)}
-              className="w-full h-20 p-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-mono outline-none focus:border-orange-200 transition-all resize-none"
+              className="w-full h-16 p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono outline-none focus:border-orange-200 transition-all resize-none"
               placeholder="粘贴包含 (1M 到期日 2025/10/16 周四) 的文本..."
             ></textarea>
-            <button onClick={handleSyncMaturity} className="w-full mt-2 py-2 bg-orange-50 text-orange-600 rounded-xl text-xs font-bold hover:bg-orange-100">同步基准日期</button>
+            <button onClick={handleSyncMaturity} className="w-full mt-2 py-1.5 bg-orange-50 text-orange-600 rounded-xl text-xs font-bold hover:bg-orange-100">解析到期日</button>
           </section>
 
-          <section className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
-             <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-               <span className="w-2 h-2 rounded-full bg-indigo-500"></span> 2. 解析新报价
+          {recognizedMaturities.length > 0 && (
+            <div className="bg-slate-900 p-4 rounded-2xl shadow-2xl animate-in slide-in-from-bottom-4">
+              <h3 className="text-[10px] font-bold text-slate-400 mb-3 uppercase tracking-widest">解析结果确认 - 可编辑 ({recognizedMaturities.length})</h3>
+              <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar text-white">
+                {recognizedMaturities.map((m, i) => (
+                  <div key={i} className="bg-slate-800 p-2 rounded-xl border border-slate-700">
+                    <div className="flex flex-wrap gap-1.5 items-center">
+                      <div className="flex flex-col">
+                        <label className="text-[9px] text-slate-500">期限</label>
+                        <input
+                          className="w-12 bg-slate-700 text-white text-xs font-bold px-1.5 py-0.5 rounded outline-none focus:ring-1 focus:ring-indigo-500"
+                          value={m.tenor}
+                          onChange={(e) => {
+                            const newMaturities = [...recognizedMaturities];
+                            newMaturities[i] = { ...newMaturities[i], tenor: e.target.value.toUpperCase() };
+                            setRecognizedMaturities(newMaturities);
+                          }}
+                        />
+                      </div>
+                      <div className="flex flex-col">
+                        <label className="text-[9px] text-slate-500">日期</label>
+                        <input
+                          type="text"
+                          className="w-24 bg-slate-700 text-white text-xs font-bold px-1.5 py-0.5 rounded outline-none focus:ring-1 focus:ring-indigo-500"
+                          value={m.date}
+                          onChange={(e) => {
+                            const newMaturities = [...recognizedMaturities];
+                            newMaturities[i] = { ...newMaturities[i], date: e.target.value };
+                            setRecognizedMaturities(newMaturities);
+                          }}
+                        />
+                      </div>
+                      <div className="flex flex-col">
+                        <label className="text-[9px] text-slate-500">星期</label>
+                        <select
+                          className="w-16 bg-slate-700 text-white text-xs font-bold px-1.5 py-0.5 rounded outline-none focus:ring-1 focus:ring-indigo-500"
+                          value={m.weekday}
+                          onChange={(e) => {
+                            const newMaturities = [...recognizedMaturities];
+                            newMaturities[i] = { ...newMaturities[i], weekday: e.target.value };
+                            setRecognizedMaturities(newMaturities);
+                          }}
+                        >
+                          <option value="">星期</option>
+                          <option value="周一">周一</option>
+                          <option value="周二">周二</option>
+                          <option value="周三">周三</option>
+                          <option value="周四">周四</option>
+                          <option value="周五">周五</option>
+                          <option value="周六">周六</option>
+                          <option value="周日">周日</option>
+                        </select>
+                      </div>
+                      <button
+                        onClick={() => {
+                          const newMaturities = recognizedMaturities.filter((_, idx) => idx !== i);
+                          setRecognizedMaturities(newMaturities);
+                        }}
+                        className="text-red-400 hover:text-red-300 text-xs ml-auto"
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-2 mt-3">
+                <button
+                  onClick={() => setRecognizedMaturities([])}
+                  className="flex-1 py-2 bg-slate-700 text-slate-300 rounded-xl text-xs font-bold hover:bg-slate-600"
+                >
+                  取消
+                </button>
+                <button onClick={handleConfirmMaturity} className="flex-1 py-2 bg-emerald-500 text-white rounded-xl text-xs font-bold hover:bg-emerald-400">
+                  确认发布
+                </button>
+              </div>
+            </div>
+          )}
+
+          <section className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+             <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+               <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span> 2. 解析新报价
              </h2>
              <textarea
                value={inputText}
                onChange={e => setInputText(e.target.value)}
-               className="w-full h-40 p-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm outline-none focus:border-indigo-200 transition-all resize-none"
+               className="w-full h-32 p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-200 transition-all resize-none"
                placeholder="可一次粘贴多条，格式: 兴业银行 AAA 周一 6M 1.62%，支持多行、逗号分隔"
              ></textarea>
              <button
                disabled={isParsing}
                onClick={handleParse}
-               className="w-full mt-4 py-4 bg-indigo-600 text-white rounded-2xl font-bold shadow-xl hover:bg-indigo-700 transition-all disabled:opacity-50"
+               className="w-full mt-3 py-3 bg-indigo-600 text-white rounded-xl font-bold shadow-xl hover:bg-indigo-700 transition-all disabled:opacity-50"
              >
                {isParsing ? '正在解析...' : '解析报价'}
              </button>
           </section>
 
           {recognizedQuotes.length > 0 && (
-            <div className="bg-slate-900 p-6 rounded-3xl shadow-2xl animate-in slide-in-from-bottom-4">
-              <h3 className="text-xs font-bold text-slate-400 mb-4 uppercase tracking-widest">解析结果确认 - 可编辑 ({recognizedQuotes.length})</h3>
+            <div className="bg-slate-900 p-4 rounded-2xl shadow-2xl animate-in slide-in-from-bottom-4">
+              <h3 className="text-xs font-bold text-slate-400 mb-3 uppercase tracking-widest">解析结果确认 - 可编辑 ({recognizedQuotes.length})</h3>
               <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar text-white">
                 {recognizedQuotes.map((q, i) => (
-                  <div key={i} className="bg-slate-800 p-3 rounded-xl border border-slate-700">
-                    <div className="flex flex-wrap gap-2 items-center">
+                  <div key={i} className="bg-slate-800 p-2 rounded-xl border border-slate-700">
+                    <div className="flex flex-wrap gap-1.5 items-center">
                       {/* 银行名 */}
                       <div className="flex flex-col">
-                        <label className="text-[10px] text-slate-500">银行</label>
+                        <label className="text-[9px] text-slate-500">银行</label>
                         <input
-                          className="w-24 bg-slate-700 text-white text-sm font-bold px-2 py-1 rounded outline-none focus:ring-1 focus:ring-indigo-500"
+                          className="w-20 bg-slate-700 text-white text-xs font-bold px-1.5 py-0.5 rounded outline-none focus:ring-1 focus:ring-indigo-500"
                           value={q.bankName || ''}
                           onChange={(e) => {
                             const newQuotes = [...recognizedQuotes];
@@ -651,7 +890,7 @@ const App: React.FC = () => {
                       </div>
                       {/* 期限 */}
                       <div className="flex flex-col">
-                        <label className="text-[10px] text-slate-500">期限</label>
+                        <label className="text-[9px] text-slate-500">期限</label>
                         <select
                           className="bg-slate-700 text-white text-sm px-2 py-1 rounded outline-none focus:ring-1 focus:ring-indigo-500"
                           value={q.tenor || ''}
@@ -671,7 +910,7 @@ const App: React.FC = () => {
                       </div>
                       {/* 收益率 */}
                       <div className="flex flex-col">
-                        <label className="text-[10px] text-slate-500">收益率(%)</label>
+                        <label className="text-[9px] text-slate-500">收益率(%)</label>
                         <input
                           className="w-20 bg-slate-700 text-indigo-400 text-sm font-bold px-2 py-1 rounded outline-none focus:ring-1 focus:ring-indigo-500"
                           value={q.yieldRate || ''}
@@ -685,7 +924,7 @@ const App: React.FC = () => {
                       </div>
                       {/* 评级 */}
                       <div className="flex flex-col">
-                        <label className="text-[10px] text-slate-500">评级</label>
+                        <label className="text-[9px] text-slate-500">评级</label>
                         <select
                           className="bg-slate-700 text-white text-sm px-2 py-1 rounded outline-none focus:ring-1 focus:ring-indigo-500"
                           value={q.rating || 'AAA'}
@@ -703,7 +942,7 @@ const App: React.FC = () => {
                       </div>
                       {/* 类别 */}
                       <div className="flex flex-col">
-                        <label className="text-[10px] text-slate-500">类别</label>
+                        <label className="text-[9px] text-slate-500">类别</label>
                         <select
                           className="bg-slate-700 text-white text-sm px-2 py-1 rounded outline-none focus:ring-1 focus:ring-indigo-500"
                           value={q.category || 'BIG'}
@@ -722,7 +961,7 @@ const App: React.FC = () => {
                       </div>
                       {/* 星期 */}
                       <div className="flex flex-col">
-                        <label className="text-[10px] text-slate-500">报价日</label>
+                        <label className="text-[9px] text-slate-500">报价日</label>
                         <select
                           className="bg-slate-700 text-white text-sm px-2 py-1 rounded outline-none focus:ring-1 focus:ring-indigo-500"
                           value={q.weekday || valueWeekday}
@@ -777,7 +1016,7 @@ const App: React.FC = () => {
                  <button onClick={() => setActiveTab('LIST')} className={`px-6 py-2 rounded-lg text-xs font-bold transition-all ${activeTab === 'LIST' ? 'bg-white shadow text-slate-900' : 'text-slate-400'}`}>单条更新</button>
                </div>
 
-               <div className="flex flex-wrap gap-2 items-center">
+               <div className="flex flex-wrap gap-1.5 items-center">
                  <input
                   placeholder="搜银行..."
                   value={searchTerm}
@@ -838,7 +1077,7 @@ const App: React.FC = () => {
                       </div>
                       <div className="space-y-2">
                         {group.items.map(item => (
-                          <div key={item.id} className="flex flex-wrap gap-2 items-center group py-1.5 hover:bg-white rounded-lg px-3 transition-colors">
+                          <div key={item.id} className="flex flex-wrap gap-1.5 items-center group py-1.5 hover:bg-white rounded-lg px-3 transition-colors">
                             <input
                               type="checkbox"
                               checked={selectedQuotes.has(item.id)}
@@ -861,7 +1100,7 @@ const App: React.FC = () => {
                             <input className="flex-1 text-slate-400 italic text-xs truncate" value={item.remarks} placeholder="备注" onChange={e => handleUpdateQuote(item.id, 'remarks', e.target.value)} />
                             <button
                               onClick={() => {
-                                const text = `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}`;
+                                const text = `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}${item.volume ? ' ' + item.volume : ''}${item.remarks ? ' ' + item.remarks : ''}`.trim();
                                 copyToClipboard(text);
                                 setCopySuccessMsg('已复制');
                                 setTimeout(() => setCopySuccessMsg(''), 1500);
@@ -883,11 +1122,11 @@ const App: React.FC = () => {
             )}
 
             {activeTab === 'LIST' && (
-              <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 flex-1 flex flex-col">
-                <div className="flex justify-between items-center mb-6">
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 flex-1 flex flex-col">
+                <div className="flex justify-between items-center mb-4">
                   <div className="flex items-center gap-4">
-                    <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">单条价格更新 (实时)</h3>
-                    <button onClick={selectAll} className="text-[10px] font-bold text-indigo-400 hover:text-indigo-600">
+                    <h3 className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">单条价格更新 (实时)</h3>
+                    <button onClick={selectAll} className="text-[9px] font-bold text-indigo-400 hover:text-indigo-600">
                       {selectedQuotes.size === sortedListQuotes.length ? '取消全选' : '全选'}
                     </button>
                   </div>
@@ -895,7 +1134,7 @@ const App: React.FC = () => {
                     <select
                       value={listSortBy}
                       onChange={e => setListSortBy(e.target.value as 'TIME' | 'YIELD')}
-                      className="bg-white border border-slate-200 px-2 py-1.5 rounded-lg text-xs font-bold"
+                      className="bg-white border border-slate-200 px-2 py-1.5 rounded-lg text-[9px] font-bold"
                     >
                       <option value="TIME">按时间</option>
                       <option value="YIELD">按收益率</option>
@@ -905,16 +1144,16 @@ const App: React.FC = () => {
                       className="p-2 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors"
                       title="倒序/正序"
                     >
-                      <svg className={`w-4 h-4 text-slate-500 transition-transform ${listSortOrder === 'ASC' ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7" strokeWidth="2" /></svg>
+                      <svg className={`w-3.5 h-3.5 text-slate-500 transition-transform ${listSortOrder === 'ASC' ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7" strokeWidth="2" /></svg>
                     </button>
-                    <button onClick={async () => {if(confirm('清空所有？')) {await deleteAllQuotations(); setAllQuotes([]);}}} className="text-[10px] font-bold text-red-400 hover:text-red-600 uppercase">Clear All</button>
+                    <button onClick={async () => {if(confirm('清空所有？')) {await deleteAllQuotations(); setAllQuotes([]);}}} className="text-[9px] font-bold text-red-400 hover:text-red-600 uppercase">Clear All</button>
                   </div>
                 </div>
-                <div className="space-y-2 flex-1 overflow-y-auto">
+                <div className="space-y-1.5 flex-1 overflow-y-auto">
                   {sortedListQuotes.map((item, idx) => {
                     const isSelected = selectedQuotes.has(item.id);
                     return (
-                      <div key={item.id} className={`flex flex-wrap gap-2 items-center group py-2 px-3 rounded-lg transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}>
+                      <div key={item.id} className={`flex flex-wrap gap-1 items-center group py-1 px-2 rounded transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}>
                         <input
                           type="checkbox"
                           checked={isSelected}
@@ -928,39 +1167,39 @@ const App: React.FC = () => {
                             e.preventDefault();
                             handleDragEnd(item.id);
                           }}
-                          className={`w-4 h-4 text-indigo-600 rounded cursor-pointer ${isDragging ? 'select-none' : ''}`}
+                          className={`w-3.5 h-3.5 text-indigo-600 rounded cursor-pointer ${isDragging ? 'select-none' : ''}`}
                           title="单击选中，或按住鼠标拖动批量选择"
                         />
-                        <span className="text-[10px] text-slate-400 font-mono w-16">{new Date(item.updatedAt || item.createdAt || Date.now()).toLocaleTimeString('zh-CN', {hour12:false, hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>
+                        <span className="text-[8px] text-slate-400 font-mono w-14">{new Date(item.updatedAt || item.createdAt || Date.now()).toLocaleTimeString('zh-CN', {hour12:false, hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>
                         <input
-                          className="w-28 font-bold bg-transparent border-none focus:bg-white outline-none p-0 text-slate-900"
+                          className="w-24 font-bold bg-transparent border-none focus:bg-white outline-none p-0 text-slate-900 text-[11px]"
                           value={item.bankName}
                           onChange={e => handleUpdateQuote(item.id, 'bankName', e.target.value)}
                         />
-                        <input className="w-10 text-slate-400 text-xs bg-transparent" value={item.rating} onChange={e => handleUpdateQuote(item.id, 'rating', e.target.value)} />
-                        <span className={`w-12 text-[10px] px-1.5 py-0.5 rounded font-bold ${item.category === 'BIG' ? 'bg-red-100 text-red-600' : item.category === 'AAA' ? 'bg-orange-100 text-orange-600' : 'bg-slate-100 text-slate-600'}`}>{item.category === 'BIG' ? '大行' : item.category}</span>
-                        <input className="w-8 text-slate-400 text-xs bg-transparent" value={item.weekday} onChange={e => handleUpdateQuote(item.id, 'weekday', e.target.value)} />
-                        <input className="w-16 text-slate-400 text-xs bg-transparent" value={item.tenor} onChange={e => handleUpdateQuote(item.id, 'tenor', e.target.value)} />
+                        <input className="w-8 text-slate-400 text-[10px] bg-transparent" value={item.rating} onChange={e => handleUpdateQuote(item.id, 'rating', e.target.value)} />
+                        <span className={`w-10 text-[8px] px-1 py-0.5 rounded font-bold ${item.category === 'BIG' ? 'bg-red-100 text-red-600' : item.category === 'AAA' ? 'bg-orange-100 text-orange-600' : 'bg-slate-100 text-slate-600'}`}>{item.category === 'BIG' ? '大行' : item.category}</span>
+                        <input className="w-6 text-slate-400 text-[10px] bg-transparent" value={item.weekday} onChange={e => handleUpdateQuote(item.id, 'weekday', e.target.value)} />
+                        <input className="w-12 text-slate-400 text-[10px] bg-transparent" value={item.tenor} onChange={e => handleUpdateQuote(item.id, 'tenor', e.target.value)} />
                         <input
-                          className={`w-20 font-bold text-right outline-none bg-transparent ${item.yieldRate.includes('↑') ? 'text-red-600' : item.yieldRate.includes('↓') ? 'text-emerald-600' : 'text-blue-600'}`}
+                          className={`w-16 font-bold text-right outline-none bg-transparent text-[11px] ${item.yieldRate.includes('↑') ? 'text-red-600' : item.yieldRate.includes('↓') ? 'text-emerald-600' : 'text-blue-600'}`}
                           value={item.yieldRate}
                           onChange={e => handleUpdateQuote(item.id, 'yieldRate', e.target.value)}
                         />
-                        <input className="w-12 text-slate-400 text-xs text-center" value={item.volume} placeholder="量" onChange={e => handleUpdateQuote(item.id, 'volume', e.target.value)} />
-                        <input className="flex-1 text-slate-400 italic text-xs truncate" value={item.remarks} placeholder="备注" onChange={e => handleUpdateQuote(item.id, 'remarks', e.target.value)} />
+                        <input className="w-10 text-slate-400 text-[10px] text-center" value={item.volume} placeholder="量" onChange={e => handleUpdateQuote(item.id, 'volume', e.target.value)} />
+                        <input className="flex-1 min-w-[80px] text-slate-400 italic text-[10px] truncate" value={item.remarks} placeholder="备注" onChange={e => handleUpdateQuote(item.id, 'remarks', e.target.value)} />
                         <button
                           onClick={() => {
-                            const text = `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}`;
+                            const text = `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}${item.volume ? ' ' + item.volume : ''}${item.remarks ? ' ' + item.remarks : ''}`.trim();
                             copyToClipboard(text);
                             setCopySuccessMsg('已复制');
                             setTimeout(() => setCopySuccessMsg(''), 1500);
                           }}
-                          className="opacity-0 group-hover:opacity-100 text-blue-300 hover:text-blue-500 transition-all text-xs font-bold"
+                          className="opacity-0 group-hover:opacity-100 text-blue-300 hover:text-blue-500 transition-all text-[9px] font-bold"
                           title="复制此行"
                         >
                           复制
                         </button>
-                        <button onClick={() => handleDeleteQuote(item.id)} className="opacity-0 group-hover:opacity-100 text-red-300 hover:text-red-500 transition-all text-xs font-bold">删除</button>
+                        <button onClick={() => handleDeleteQuote(item.id)} className="opacity-0 group-hover:opacity-100 text-red-300 hover:text-red-500 transition-all text-[9px] font-bold">删除</button>
                       </div>
                     );
                   })}

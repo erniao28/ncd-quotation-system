@@ -14,6 +14,7 @@ export function setupSocket(io) {
       id: q.id,
       bankName: q.bank_name,
       rating: q.rating,
+      category: q.category || 'AAA',
       tenor: q.tenor,
       yieldRate: q.yield_rate,
       weekday: q.weekday,
