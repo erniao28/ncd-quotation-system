@@ -5,6 +5,7 @@ import {
   addQuotation,
   updateQuotation,
   deleteQuotation,
+  deleteAllQuotations,
   getAllMaturities,
   upsertMaturity,
   getConfig,
@@ -146,6 +147,17 @@ router.delete('/quotations/:id', (req, res) => {
   } catch (error) {
     console.error('[API] 删除报价失败:', error);
     res.status(500).json({ error: '删除报价失败' });
+  }
+});
+
+// 清空所有报价
+router.delete('/quotations', (req, res) => {
+  try {
+    deleteAllQuotations();
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[API] 清空报价失败:', error);
+    res.status(500).json({ error: '清空报价失败' });
   }
 });
 

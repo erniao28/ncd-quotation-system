@@ -158,6 +158,11 @@ function deleteQuotation(id) {
   return { id };
 }
 
+function deleteAllQuotations() {
+  db.run('DELETE FROM quotations');
+  saveDatabase();
+}
+
 // ========== 期限配置操作 ==========
 
 function getAllMaturities() {
@@ -209,6 +214,7 @@ export {
   addQuotation,
   updateQuotation,
   deleteQuotation,
+  deleteAllQuotations,
   getAllMaturities,
   upsertMaturity,
   getConfig,
