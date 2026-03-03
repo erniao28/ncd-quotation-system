@@ -246,7 +246,20 @@ function findYieldRate(text: string): string {
       if (value >= 100) {
         value = value / 100;
       }
-      return parseFloat(value.toFixed(4)).toString();
+      // 格式化收益率：最多 4 位小数，至少显示 2 位小数
+      let formatted = value.toFixed(4);
+      // 去掉末尾多余的 0，但至少保留 2 位小数
+      formatted = formatted.replace(/(\.\d{2,})0+$/, '$1');
+      // 确保至少 2 位小数
+      if (!formatted.includes('.')) {
+        formatted += '.00';
+      } else {
+        const decimalPart = formatted.split('.')[1];
+        if (decimalPart.length < 2) {
+          formatted = value.toFixed(2);
+        }
+      }
+      return formatted;
     }
   }
   return '';
