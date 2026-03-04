@@ -21,6 +21,8 @@ import {
 } from './services/api';
 import html2canvas from 'html2canvas';
 
+const APP_VERSION = '20260304'; // 版本号：YYYYMMDD 格式
+
 const App: React.FC = () => {
   const [inputText, setInputText] = useState('');
   const [maturityInput, setMaturityInput] = useState('');
@@ -45,6 +47,7 @@ const App: React.FC = () => {
   const [isConnected, setIsConnected] = useState(false);
   const [selectedQuotes, setSelectedQuotes] = useState<Set<string>>(new Set());
   const [copySuccessMsg, setCopySuccessMsg] = useState('');
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   // 拖动多选功能
   const [isDragging, setIsDragging] = useState(false);
@@ -581,46 +584,32 @@ const App: React.FC = () => {
     try {
       // 使用 html2canvas 截取图片
       const canvas = await html2canvas(cardElement, {
-        scale: 2, // 提高清晰度
+        scale: 2,
         useCORS: true,
         backgroundColor: '#ffffff'
       });
 
-      // 转换为 blob 并复制到剪贴板
-      canvas.toBlob(async (blob) => {
-        if (!blob) {
-          alert('图片生成失败');
-          return;
-        }
+      // 转换为 base64 用于预览
+      const dataUrl = canvas.toDataURL('image/png');
+      setPreviewImage(dataUrl);
 
+      // 同时尝试复制到剪贴板
+      canvas.toBlob(async (blob) => {
+        if (!blob) return;
         try {
-          // 尝试使用现代 API 复制到剪贴板
           if (navigator.clipboard && navigator.clipboard.write) {
             const item = new ClipboardItem({ 'image/png': blob });
             await navigator.clipboard.write([item]);
-            setCopySuccessMsg('已复制看板图片');
-          } else {
-            // 降级方案：下载到本地
-            const link = document.createElement('a');
-            link.download = `ncd-quotation-${Date.now()}.png`;
-            link.href = URL.createObjectURL(blob);
-            link.click();
-            setCopySuccessMsg('已下载看板图片');
+            setCopySuccessMsg('已复制图片');
           }
         } catch (err) {
-          console.error('复制失败:', err);
-          // 降级方案：下载到本地
-          const link = document.createElement('a');
-          link.download = `ncd-quotation-${Date.now()}.png`;
-          link.href = URL.createObjectURL(blob);
-          link.click();
-          setCopySuccessMsg('已下载看板图片到本地');
+          setCopySuccessMsg('图片已生成，请右键保存或拖拽使用');
         }
-        setTimeout(() => setCopySuccessMsg(''), 2000);
+        setTimeout(() => setCopySuccessMsg(''), 3000);
       }, 'image/png');
     } catch (error) {
       console.error('截图失败:', error);
-      alert('复制看板失败：' + error);
+      alert('生成图片失败：' + error);
     }
   };
 
@@ -724,6 +713,7 @@ const App: React.FC = () => {
           <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${isConnected ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-600'}`}>
             {isConnected ? '● 已连接' : '○ 未连接'}
           </span>
+          <span className="text-[9px] font-mono text-slate-400 bg-slate-100 px-2 py-0.5 rounded ml-2">v{APP_VERSION}</span>
         </div>
         <div className="flex gap-2">
           <button
@@ -745,7 +735,7 @@ const App: React.FC = () => {
             删除选中
           </button>
           <button onClick={handleCopyCardAsImage} className="px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-700 transition-all">
-            复制看板图
+            生成图片
           </button>
           <button onClick={handleCopyAll} className={`px-3 py-1.5 rounded-xl text-xs font-bold shadow-lg transition-all ${copyFeedback ? 'bg-emerald-500 text-white' : 'bg-slate-900 text-white hover:bg-slate-800'}`}>
             {copyFeedback ? '复制成功' : '复制全部'}
@@ -1210,8 +1200,42 @@ const App: React.FC = () => {
           </div>
         </div>
       </main>
+
+      {previewImage && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-8" onClick={() => setPreviewImage(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-6xl w-full max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}>
+            <div className="p-6 border-b border-slate-200 flex justify-between items-center">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">看板图片预览</h3>
+                <p className="text-[10px] text-slate-400 mt-1">右键点击图片可复制，或拖拽到微信/钉钉发送</p>
+              </div>
+              <button onClick={() => setPreviewImage(null)} className="text-slate-400 hover:text-slate-600 text-2xl">×</button>
+            </div>
+            <div className="p-6 bg-slate-50 flex justify-center">
+              <img src={previewImage} alt="看板预览" className="max-w-full h-auto shadow-lg" />
+            </div>
+            <div className="p-4 border-t border-slate-200 flex justify-between items-center bg-white rounded-b-2xl">
+              <span className="text-[10px] text-slate-400">生成时间：{new Date().toLocaleString('zh-CN')}</span>
+              <div className="flex gap-2">
+                <button onClick={() => {
+                  const link = document.createElement('a');
+                  link.download = `ncd-quotation-${Date.now()}.png`;
+                  link.href = previewImage;
+                  link.click();
+                }} className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700">
+                  下载到本地
+                </button>
+                <button onClick={() => setPreviewImage(null)} className="px-4 py-2 bg-slate-200 text-slate-700 rounded-xl text-xs font-bold hover:bg-slate-300">
+                  关闭
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <footer className="p-8 text-center text-[10px] text-slate-300 font-bold uppercase tracking-widest">
-        Professional NCD Engine • 智能解析 • 多人实时协作
+        Professional NCD Engine • 智能解析 • 多人实时协作 <span className="text-slate-500">| v{APP_VERSION}</span>
       </footer>
     </div>
   );
