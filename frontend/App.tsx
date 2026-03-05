@@ -21,7 +21,7 @@ import {
 } from './services/api';
 import html2canvas from 'html2canvas';
 
-const APP_VERSION = '20260304'; // 版本号：YYYYMMDD 格式
+const APP_VERSION = '20260305'; // 版本号：YYYYMMDD 格式
 
 const App: React.FC = () => {
   const [inputText, setInputText] = useState('');
@@ -320,10 +320,6 @@ const App: React.FC = () => {
     // 先本地更新
     setAllQuotes(prev => prev.map(q => q.id === id ? { ...q, [field]: finalValue } : q));
 
-    // 获取更新后的数据
-    const quote = allQuotes.find(q => q.id === id);
-    if (!quote) return;
-
     // 发送到后端
     try {
       const updated = await updateQuotationApi(id, { [field]: finalValue });
@@ -332,6 +328,39 @@ const App: React.FC = () => {
     } catch (error) {
       console.error('更新报价失败:', error);
     }
+  };
+
+  // 点击行选中并复制
+  const handleRowClick = (id: string, item: Quotation, event: React.MouseEvent) => {
+    // 处理选中逻辑（支持 Ctrl 多选）
+    setSelectedQuotes(prev => {
+      const newSet = new Set(prev);
+      const isCtrlClick = event.ctrlKey || event.metaKey;
+
+      if (isCtrlClick) {
+        // Ctrl 点击：切换当前项的选中状态
+        if (newSet.has(id)) {
+          newSet.delete(id);
+        } else {
+          newSet.add(id);
+        }
+      } else {
+        // 非 Ctrl 点击：如果已选中则取消，如果未选中则单选该项
+        if (newSet.has(id)) {
+          newSet.delete(id);
+        } else {
+          newSet.clear();
+          newSet.add(id);
+        }
+      }
+      return newSet;
+    });
+
+    // 自动复制该行内容
+    const text = `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}${item.volume ? ' ' + item.volume : ''}${item.remarks ? ' ' + item.remarks : ''}`.trim();
+    copyToClipboard(text);
+    setCopySuccessMsg('已复制');
+    setTimeout(() => setCopySuccessMsg(''), 1500);
   };
 
   // 手动更新到期日（批量更新所有相同期限的报价）
@@ -547,7 +576,7 @@ const App: React.FC = () => {
     return success;
   };
 
-  // 复制选中报价的函数
+  // 复制选中报价的函数（不带到期日）
   const handleCopySelected = () => {
     const selectedItems = groupedQuotes.flatMap(g =>
       g.items.filter(i => selectedQuotes.has(i.id))
@@ -564,6 +593,42 @@ const App: React.FC = () => {
     }).join('\n');
     const success = copyToClipboard(text);
     setCopySuccessMsg(success ? `已复制 ${selectedItems.length} 条报价` : '复制失败，请手动复制');
+    setTimeout(() => setCopySuccessMsg(''), 2000);
+  };
+
+  // 复制选中报价的函数（带到期日，同复制全部格式）
+  const handleCopySelectedWithTenor = () => {
+    const selectedItems = groupedQuotes.flatMap(g =>
+      g.items.filter(i => selectedQuotes.has(i.id))
+    );
+    if (selectedItems.length === 0) {
+      setCopySuccessMsg('请先选择要复制的报价');
+      setTimeout(() => setCopySuccessMsg(''), 2000);
+      return;
+    }
+    // 按期限分组
+    const byTenor: Record<string, typeof selectedItems> = {};
+    selectedItems.forEach(item => {
+      if (!byTenor[item.tenor]) byTenor[item.tenor] = [];
+      byTenor[item.tenor].push(item);
+    });
+
+    const tenorOrder = ['1M', '3M', '6M', '9M', '1Y'];
+    const text = tenorOrder
+      .filter(t => byTenor[t] && byTenor[t].length > 0)
+      .map(tenor => {
+        const group = groupedQuotes.find(g => g.tenor === tenor);
+        const header = `(${tenor} 到期日 ${group?.maturityDate || '--'} ${group?.maturityWeekday || ''})`;
+        const rows = byTenor[tenor].map(i => {
+          const vol = i.volume ? ` ${i.volume}` : '';
+          const remarks = i.remarks ? ` ${i.remarks}` : '';
+          return `${i.bankName} ${i.rating} ${i.weekday} ${i.tenor} ${i.yieldRate}${vol}${remarks}`.trim();
+        }).join('\n');
+        return `${header}\n${rows}`;
+      }).join('\n\n');
+
+    const success = copyToClipboard(text);
+    setCopySuccessMsg(success ? `已复制 ${selectedItems.length} 条报价（分期限）` : '复制失败，请手动复制');
     setTimeout(() => setCopySuccessMsg(''), 2000);
   };
 
@@ -728,8 +793,11 @@ const App: React.FC = () => {
             <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">起息周几:</span>
             <input value={valueWeekday} onChange={e => setValueWeekday(e.target.value)} className="bg-transparent w-6 text-indigo-600 font-bold border-none outline-none text-xs text-center" />
           </div>
-          <button onClick={handleCopySelected} className="px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-700 transition-all">
+          <button onClick={handleCopySelected} className="px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-700 transition-all" title="只复制选中的报价内容">
             复制选中 ({selectedQuotes.size})
+          </button>
+          <button onClick={handleCopySelectedWithTenor} className="px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-500 text-white hover:bg-indigo-600 transition-all" title="复制选中报价，带到期期限行">
+            复制选中分期限
           </button>
           <button onClick={handleDeleteSelected} disabled={selectedQuotes.size === 0} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${selectedQuotes.size > 0 ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}>
             删除选中
@@ -1079,7 +1147,16 @@ const App: React.FC = () => {
                               value={item.bankName}
                               onChange={e => handleUpdateQuote(item.id, 'bankName', e.target.value)}
                             />
-                            <input className="w-10 text-slate-400 text-xs bg-transparent" value={item.rating} onChange={e => handleUpdateQuote(item.id, 'rating', e.target.value)} />
+                            <select
+                              className="w-10 text-slate-400 text-xs bg-transparent outline-none cursor-pointer"
+                              value={item.rating}
+                              onChange={e => handleUpdateQuote(item.id, 'rating', e.target.value)}
+                            >
+                              <option value="AAA">AAA</option>
+                              <option value="AA+">AA+</option>
+                              <option value="AA">AA</option>
+                              <option value="AA-">AA-</option>
+                            </select>
                             <input className="w-8 text-slate-400 text-xs bg-transparent" value={item.weekday} onChange={e => handleUpdateQuote(item.id, 'weekday', e.target.value)} />
                             <input
                               className={`w-20 font-bold text-right outline-none bg-transparent ${item.yieldRate.includes('↑') ? 'text-red-600' : item.yieldRate.includes('↓') ? 'text-emerald-600' : 'text-blue-600'}`}
@@ -1142,17 +1219,37 @@ const App: React.FC = () => {
                 <div className="space-y-1.5 flex-1 overflow-y-auto">
                   {sortedListQuotes.map((item, idx) => {
                     const isSelected = selectedQuotes.has(item.id);
+                    const displayVolume = item.volume ? (item.volume.replace(/亿 | 元/g, '') + '亿') : '';
                     return (
-                      <div key={item.id} className={`flex flex-wrap gap-1 items-center group py-1 px-2 rounded transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}>
+                      <div
+                        key={item.id}
+                        className={`flex flex-wrap gap-1 items-center group py-1 px-2 rounded transition-colors cursor-pointer ${
+                          isSelected
+                            ? 'bg-indigo-100 border border-indigo-300'
+                            : idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'
+                        }`}
+                        onClick={(e) => {
+                          // 如果点击的是 input 或 button，不触发选中
+                          if (e.target instanceof HTMLInputElement || e.target instanceof HTMLButtonElement) return;
+                          handleRowClick(item.id, item, e);
+                        }}
+                      >
                         <input
                           type="checkbox"
                           checked={isSelected}
-                          onChange={(e) => e.preventDefault()}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                            toggleSelect(item.id);
+                          }}
                           onMouseDown={(e) => {
                             e.preventDefault();
+                            e.stopPropagation();
                             handleDragStart(item.id, isSelected);
                           }}
-                          onMouseEnter={() => handleDragEnter(item.id)}
+                          onMouseEnter={(e) => {
+                            e.preventDefault();
+                            handleDragEnter(item.id);
+                          }}
                           onMouseUp={(e) => {
                             e.preventDefault();
                             handleDragEnd(item.id);
@@ -1164,21 +1261,59 @@ const App: React.FC = () => {
                         <input
                           className="w-24 font-bold bg-transparent border-none focus:bg-white outline-none p-0 text-slate-900 text-[11px]"
                           value={item.bankName}
+                          onClick={(e) => e.stopPropagation()}
                           onChange={e => handleUpdateQuote(item.id, 'bankName', e.target.value)}
                         />
-                        <input className="w-8 text-slate-400 text-[10px] bg-transparent" value={item.rating} onChange={e => handleUpdateQuote(item.id, 'rating', e.target.value)} />
-                        <span className={`w-10 text-[8px] px-1 py-0.5 rounded font-bold ${item.category === 'BIG' ? 'bg-red-100 text-red-600' : item.category === 'AAA' ? 'bg-orange-100 text-orange-600' : 'bg-slate-100 text-slate-600'}`}>{item.category === 'BIG' ? '大行' : item.category}</span>
-                        <input className="w-6 text-slate-400 text-[10px] bg-transparent" value={item.weekday} onChange={e => handleUpdateQuote(item.id, 'weekday', e.target.value)} />
-                        <input className="w-12 text-slate-400 text-[10px] bg-transparent" value={item.tenor} onChange={e => handleUpdateQuote(item.id, 'tenor', e.target.value)} />
+                        <select
+                          className="w-10 text-slate-400 text-[10px] bg-transparent outline-none cursor-pointer"
+                          value={item.rating}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={e => handleUpdateQuote(item.id, 'rating', e.target.value)}
+                        >
+                          <option value="AAA">AAA</option>
+                          <option value="AA+">AA+</option>
+                          <option value="AA">AA</option>
+                          <option value="AA-">AA-</option>
+                        </select>
+                        <select
+                          className="w-10 text-[8px] px-1 py-0.5 rounded font-bold cursor-pointer outline-none"
+                          value={item.category}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={e => handleUpdateQuote(item.id, 'category', e.target.value as any)}
+                        >
+                          <option value="BIG">大行</option>
+                          <option value="AAA">AAA</option>
+                          <option value="AA+">AA+</option>
+                          <option value="AA">AA</option>
+                          <option value="AA-">AA-</option>
+                        </select>
+                        <input className="w-6 text-slate-400 text-[10px] bg-transparent" value={item.weekday} onClick={(e) => e.stopPropagation()} onChange={e => handleUpdateQuote(item.id, 'weekday', e.target.value)} />
+                        <input className="w-12 text-slate-400 text-[10px] bg-transparent" value={item.tenor} onClick={(e) => e.stopPropagation()} onChange={e => handleUpdateQuote(item.id, 'tenor', e.target.value)} />
                         <input
                           className={`w-16 font-bold text-right outline-none bg-transparent text-[11px] ${item.yieldRate.includes('↑') ? 'text-red-600' : item.yieldRate.includes('↓') ? 'text-emerald-600' : 'text-blue-600'}`}
                           value={item.yieldRate}
-                          onChange={e => handleUpdateQuote(item.id, 'yieldRate', e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={e => {
+                            const val = e.target.value;
+                            // 允许输入 % 和涨跌符号
+                            const cleanVal = val.replace(/[^\d.↑↓%]/g, '');
+                            handleUpdateQuote(item.id, 'yieldRate', cleanVal);
+                          }}
                         />
-                        <input className="w-10 text-slate-400 text-[10px] text-center" value={item.volume} placeholder="量" onChange={e => handleUpdateQuote(item.id, 'volume', e.target.value)} />
-                        <input className="flex-1 min-w-[80px] text-slate-400 italic text-[10px] truncate" value={item.remarks} placeholder="备注" onChange={e => handleUpdateQuote(item.id, 'remarks', e.target.value)} />
+                        <input
+                          className="w-20 text-slate-400 text-[10px] text-center outline-none"
+                          value={displayVolume}
+                          placeholder="量"
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={e => {
+                            const val = e.target.value.replace(/[^0-9.]/g, '');
+                            handleUpdateQuote(item.id, 'volume', val ? val + '亿' : '');
+                          }}
+                        />
+                        <input className="flex-1 min-w-[80px] text-slate-400 italic text-[10px] truncate" value={item.remarks} placeholder="备注" onClick={(e) => e.stopPropagation()} onChange={e => handleUpdateQuote(item.id, 'remarks', e.target.value)} />
                         <button
-                          onClick={() => {
+                          onClick={(e) => {
+                            e.stopPropagation();
                             const text = `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}${item.volume ? ' ' + item.volume : ''}${item.remarks ? ' ' + item.remarks : ''}`.trim();
                             copyToClipboard(text);
                             setCopySuccessMsg('已复制');
@@ -1189,7 +1324,15 @@ const App: React.FC = () => {
                         >
                           复制
                         </button>
-                        <button onClick={() => handleDeleteQuote(item.id)} className="opacity-0 group-hover:opacity-100 text-red-300 hover:text-red-500 transition-all text-[9px] font-bold">删除</button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteQuote(item.id);
+                          }}
+                          className="opacity-0 group-hover:opacity-100 text-red-300 hover:text-red-500 transition-all text-[9px] font-bold"
+                        >
+                          删除
+                        </button>
                       </div>
                     );
                   })}

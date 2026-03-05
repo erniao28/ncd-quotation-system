@@ -32,6 +32,19 @@ export const QuotationEditor: React.FC<QuotationEditorProps> = ({ quote, index, 
         <option value="AAA">AAA</option>
         <option value="AA+">AA+</option>
         <option value="AA">AA</option>
+        <option value="AA-">AA-</option>
+      </select>
+      <select
+        name="category"
+        value={quote.category || 'BIG'}
+        onChange={handleChange}
+        className="px-2 py-1 border rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+      >
+        <option value="BIG">大行</option>
+        <option value="AAA">AAA</option>
+        <option value="AA+">AA+</option>
+        <option value="AA">AA</option>
+        <option value="AA-">AA-</option>
       </select>
       <select
         name="tenor"
@@ -47,7 +60,7 @@ export const QuotationEditor: React.FC<QuotationEditorProps> = ({ quote, index, 
       </select>
       <input
         name="yieldRate"
-        value={quote.yieldRate || ''}
+        value={quote.yieldRate?.replace(/%|↑|↓/g, '') || ''}
         onChange={handleChange}
         placeholder="收益率"
         className="px-2 py-1 border rounded text-sm w-20 focus:outline-none focus:ring-1 focus:ring-blue-500"

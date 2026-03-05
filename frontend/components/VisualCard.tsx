@@ -65,7 +65,7 @@ export const VisualCard: React.FC<VisualCardProps> = ({ groupedQuotes, onEditMat
             <tr className="bg-slate-100 text-slate-600 text-[8px] font-black uppercase">
               <th className="p-1.5 border-r border-slate-300 border-b-2 border-slate-900 w-28">期限</th>
               {categories.map(cat => (
-                <th key={cat.key} className="p-1.5 border-r border-slate-300 border-b-2 border-slate-900 text-left last:border-r-0" colSpan={2}>
+                <th key={cat.key} className="p-1.5 border-r border-slate-200 border-b-2 border-slate-900 text-left last:border-r-0 text-center">
                   {cat.label}
                 </th>
               ))}
@@ -77,7 +77,7 @@ export const VisualCard: React.FC<VisualCardProps> = ({ groupedQuotes, onEditMat
               const maxRows = Math.max(...categories.map(cat => group?.items.filter(i => i.category === (cat.key as any)).length || 0), 1);
 
               return Array.from({ length: maxRows }).map((_, rowIndex) => (
-                <tr key={`${tenor}-${rowIndex}`} className={`border-b border-slate-200 ${rowIndex === maxRows - 1 ? 'border-b-2 border-slate-400' : ''}`}>
+                <tr key={`${tenor}-${rowIndex}`} className={`border-b border-slate-150 ${rowIndex === maxRows - 1 ? 'border-b-2 border-slate-300' : ''}`}>
                   {rowIndex === 0 && (
                     <td className="bg-slate-50 border-r border-slate-300 p-1.5 text-center align-middle" rowSpan={maxRows}>
                       <div className="flex flex-col items-center">
@@ -140,28 +140,36 @@ export const VisualCard: React.FC<VisualCardProps> = ({ groupedQuotes, onEditMat
                     </td>
                   )}
                   {categories.map(cat => {
-                    const item = group?.items.filter(i => i.category === (cat.key as any))[rowIndex];
-                    const isUp = item?.yieldRate.includes('↑');
-                    const isDown = item?.yieldRate.includes('↓');
+                    const items = group?.items.filter(i => i.category === (cat.key as any)) || [];
+                    const item = items[rowIndex];
+                    const hasItem = !!item;
+                    const isUp = hasItem && item.yieldRate.includes('↑');
+                    const isDown = hasItem && item.yieldRate.includes('↓');
                     return (
                       <React.Fragment key={cat.key}>
-                        <td className={`p-1.5 pl-2 border-r border-slate-100 w-20 text-[9px] font-bold ${item ? (isUp ? 'text-red-600' : isDown ? 'text-emerald-600' : 'text-slate-700') : 'opacity-0'}`}>
-                          {item?.bankName || ''}
+                        <td className={`p-1.5 pl-2 border-r border-slate-200 last:border-r-0 border-b border-slate-100 last:border-b-0 ${rowIndex === maxRows - 1 ? 'border-b-0' : ''} ${hasItem ? '' : 'opacity-0'}`}>
+                          <span className={`text-[9px] font-bold ${hasItem ? (isUp ? 'text-red-600' : isDown ? 'text-emerald-600' : 'text-slate-700') : ''}`}>
+                            {item?.bankName || ' '}
+                          </span>
                         </td>
-                        <td className={`p-1.5 pr-2 border-r border-slate-300 last:border-r-0 ${item ? 'opacity-100' : 'opacity-0'}`}>
-                          <div className="flex items-center gap-1">
-                            <span className={`text-[9px] font-black font-mono ${isUp ? 'text-red-600' : isDown ? 'text-emerald-600' : 'text-blue-700'}`}>
-                              {item?.yieldRate || ''}
-                            </span>
-                            {item?.remarks && (
-                              <span className="text-[6px] text-slate-400 italic truncate flex-1">{item.remarks}</span>
-                            )}
-                            {item?.volume && (
-                              <span className="text-[6px] font-black text-slate-400 border border-slate-100 px-0.5 rounded bg-slate-50 shrink-0">
-                                {item.volume}+
+                        <td className={`p-1.5 pr-2 border-r border-slate-200 last:border-r-0 border-b border-slate-100 last:border-b-0 ${rowIndex === maxRows - 1 ? 'border-b-0' : ''} ${hasItem ? '' : 'opacity-0'}`}>
+                          {hasItem ? (
+                            <div className="flex items-center gap-1">
+                              <span className={`text-[9px] font-black font-mono ${isUp ? 'text-red-600' : isDown ? 'text-emerald-600' : 'text-blue-700'}`}>
+                                {item.yieldRate}
                               </span>
-                            )}
-                          </div>
+                              {item.remarks && (
+                                <span className="text-[6px] text-slate-500 font-medium truncate flex-1" title={item.remarks}>{item.remarks}</span>
+                              )}
+                              {item.volume && (
+                                <span className="text-[6px] font-bold text-slate-600 bg-slate-100 px-1 rounded shrink-0">
+                                  {item.volume}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-[6px] text-slate-200"> </span>
+                          )}
                         </td>
                       </React.Fragment>
                     );

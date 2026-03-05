@@ -99,12 +99,13 @@ function getAllQuotations() {
 function addQuotation(quote) {
   const now = Date.now();
   db.run(`
-    INSERT INTO quotations (id, bank_name, rating, tenor, yield_rate, weekday, maturity_date, maturity_weekday, volume, remarks, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO quotations (id, bank_name, rating, category, tenor, yield_rate, weekday, maturity_date, maturity_weekday, volume, remarks, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, [
     quote.id,
     quote.bank_name || '',
     quote.rating || '',
+    quote.category || '',
     quote.tenor,
     quote.yield_rate || '',
     quote.weekday || '',
