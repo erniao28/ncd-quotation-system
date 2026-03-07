@@ -80,7 +80,6 @@ const App: React.FC = () => {
   // 拖动多选功能
   const [isDragging, setIsDragging] = useState(false);
   const [dragMode, setDragMode] = useState<'select' | 'deselect'>('select');
-  const [dragStartIndex, setDragStartIndex] = useState<number | null>(null);
 
   // 撤销功能的历史记录
   const [history, setHistory] = useState<Quotation[][]>([]);
@@ -838,28 +837,33 @@ const App: React.FC = () => {
 
   // 记录拖动开始的复选框 ID
   const [dragStartId, setDragStartId] = useState<string | null>(null);
+  // 记录拖动开始时的所有可见 ID 列表（用于处理排序后的拖曳）
+  const [dragStartVisibleIds, setDragStartVisibleIds] = useState<string[]>([]);
 
-  // 拖动选择开始 - 只记录状态，不立即切换（在 onMouseUp 时切换）
-  const handleDragStart = (id: string, isChecked: boolean, index: number) => {
+  // 拖动选择开始
+  const handleDragStart = (id: string, isChecked: boolean, visibleIds: string[]) => {
     setDragStartId(id);
-    setDragStartIndex(index);
+    setDragStartVisibleIds(visibleIds);
     setIsDragging(true);
     setDragMode(isChecked ? 'deselect' : 'select');
   };
 
-  // 拖动经过 - 基于索引范围选择
-  const handleDragEnter = (id: string, index: number) => {
-    if (!isDragging || dragStartIndex === null) return;
+  // 拖动经过 - 基于 ID 列表范围选择
+  const handleDragEnter = (id: string) => {
+    if (!isDragging || dragStartId === null || dragStartVisibleIds.length === 0) return;
 
     setSelectedQuotes(prev => {
       const newSet = new Set(prev);
-      const start = Math.min(dragStartIndex, index);
-      const end = Math.max(dragStartIndex, index);
+      const startIndex = dragStartVisibleIds.indexOf(dragStartId);
+      const endIndex = dragStartVisibleIds.indexOf(id);
+      if (startIndex === -1 || endIndex === -1) return newSet;
 
-      // 使用 filteredQuotes 来获取当前可见的所有 ID
-      const visibleIds = filteredQuotes.slice(start, end + 1).map(q => q.id);
+      const start = Math.min(startIndex, endIndex);
+      const end = Math.max(startIndex, endIndex);
 
-      for (const cid of visibleIds) {
+      const rangeIds = dragStartVisibleIds.slice(start, end + 1);
+
+      for (const cid of rangeIds) {
         if (dragMode === 'select') {
           newSet.add(cid);
         } else {
@@ -870,11 +874,11 @@ const App: React.FC = () => {
     });
   };
 
-  // 拖动结束 - 不再切换状态，因为开始时已经切换过了
-  const handleDragEnd = (id: string) => {
+  // 拖动结束
+  const handleDragEnd = () => {
     setIsDragging(false);
     setDragStartId(null);
-    setDragStartIndex(null);
+    setDragStartVisibleIds([]);
   };
 
   // 全局鼠标抬起事件，结束拖动
@@ -1309,11 +1313,11 @@ const App: React.FC = () => {
                       </div>
                       <div className="space-y-1">
                         {group.items.map((item, itemIdx) => {
-                          // 计算在 filteredQuotes 中的索引
-                          const globalIndex = filteredQuotes.findIndex(q => q.id === item.id);
                           const isSelected = selectedQuotes.has(item.id);
                           // 双击编辑模式 - 只有在 editingId 匹配时才可编辑
                           const isEditable = editingId === item.id;
+                          // 当前组内的 ID 列表（用于拖曳选择）
+                          const groupIds = group.items.map(i => i.id);
                           return (
                           <div key={item.id} className={`flex flex-nowrap gap-1 items-center group py-1 px-2 rounded transition-colors ${
                             isSelected ? 'bg-indigo-100 border border-indigo-300' : 'hover:bg-white'
@@ -1332,15 +1336,15 @@ const App: React.FC = () => {
                               // 按下鼠标开始拖曳
                               e.preventDefault();
                               e.stopPropagation();
-                              handleDragStart(item.id, isSelected, globalIndex);
+                              handleDragStart(item.id, isSelected, groupIds);
                             }}
                             onMouseEnter={() => {
-                              handleDragEnter(item.id, globalIndex);
+                              handleDragEnter(item.id);
                             }}
                             onMouseUp={(e) => {
                               e.preventDefault();
                               e.stopPropagation();
-                              handleDragEnd(item.id);
+                              handleDragEnd();
                             }}
                           >
                             <input
@@ -1360,14 +1364,14 @@ const App: React.FC = () => {
                               }}
                               onMouseDown={(e) => {
                                 e.stopPropagation();
-                                handleDragStart(item.id, isSelected, globalIndex);
+                                handleDragStart(item.id, isSelected, groupIds);
                               }}
                               onMouseEnter={(e) => {
-                                handleDragEnter(item.id, globalIndex);
+                                handleDragEnter(item.id);
                               }}
                               onMouseUp={(e) => {
                                 e.stopPropagation();
-                                handleDragEnd(item.id);
+                                handleDragEnd();
                               }}
                               className="w-3.5 h-3.5 text-indigo-600 rounded shrink-0 cursor-pointer"
                               title="点击选中，或拖曳批量选择"
@@ -1558,8 +1562,8 @@ const App: React.FC = () => {
                     const isSelected = selectedQuotes.has(item.id);
                     // 双击编辑模式 - 只有在 editingId 匹配时才可编辑
                     const isEditable = editingId === item.id;
-                    // 计算在 filteredQuotes 中的索引（用于拖曳选择）
-                    const globalIndex = filteredQuotes.findIndex(q => q.id === item.id);
+                    // 当前可见的 ID 列表（用于拖曳选择）
+                    const visibleIds = sortedListQuotes.map(i => i.id);
                     return (
                       <div
                         key={item.id}
@@ -1593,15 +1597,15 @@ const App: React.FC = () => {
                           // 按下鼠标开始拖曳
                           e.preventDefault();
                           e.stopPropagation();
-                          handleDragStart(item.id, isSelected, globalIndex);
+                          handleDragStart(item.id, isSelected, visibleIds);
                         }}
                         onMouseEnter={() => {
-                          handleDragEnter(item.id, globalIndex);
+                          handleDragEnter(item.id);
                         }}
                         onMouseUp={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          handleDragEnd(item.id);
+                          handleDragEnd();
                         }}
                       >
                         <input
@@ -1621,14 +1625,14 @@ const App: React.FC = () => {
                           }}
                           onMouseDown={(e) => {
                             e.stopPropagation();
-                            handleDragStart(item.id, isSelected, globalIndex);
+                            handleDragStart(item.id, isSelected, visibleIds);
                           }}
                           onMouseEnter={(e) => {
-                            handleDragEnter(item.id, globalIndex);
+                            handleDragEnter(item.id);
                           }}
                           onMouseUp={(e) => {
                             e.stopPropagation();
-                            handleDragEnd(item.id);
+                            handleDragEnd();
                           }}
                           className={`w-3.5 h-3.5 text-indigo-600 rounded cursor-pointer shrink-0 ${isDragging ? 'select-none' : ''}`}
                           title="点击选中，或拖曳批量选择"
