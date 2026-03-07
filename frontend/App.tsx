@@ -1558,6 +1558,8 @@ const App: React.FC = () => {
                     const isSelected = selectedQuotes.has(item.id);
                     // 双击编辑模式 - 只有在 editingId 匹配时才可编辑
                     const isEditable = editingId === item.id;
+                    // 计算在 filteredQuotes 中的索引（用于拖曳选择）
+                    const globalIndex = filteredQuotes.findIndex(q => q.id === item.id);
                     return (
                       <div
                         key={item.id}
@@ -1591,10 +1593,10 @@ const App: React.FC = () => {
                           // 按下鼠标开始拖曳
                           e.preventDefault();
                           e.stopPropagation();
-                          handleDragStart(item.id, isSelected, idx);
+                          handleDragStart(item.id, isSelected, globalIndex);
                         }}
                         onMouseEnter={() => {
-                          handleDragEnter(item.id, idx);
+                          handleDragEnter(item.id, globalIndex);
                         }}
                         onMouseUp={(e) => {
                           e.preventDefault();
@@ -1616,6 +1618,17 @@ const App: React.FC = () => {
                           }}
                           onClick={(e) => {
                             e.stopPropagation();
+                          }}
+                          onMouseDown={(e) => {
+                            e.stopPropagation();
+                            handleDragStart(item.id, isSelected, globalIndex);
+                          }}
+                          onMouseEnter={(e) => {
+                            handleDragEnter(item.id, globalIndex);
+                          }}
+                          onMouseUp={(e) => {
+                            e.stopPropagation();
+                            handleDragEnd(item.id);
                           }}
                           className={`w-3.5 h-3.5 text-indigo-600 rounded cursor-pointer shrink-0 ${isDragging ? 'select-none' : ''}`}
                           title="点击选中，或拖曳批量选择"
