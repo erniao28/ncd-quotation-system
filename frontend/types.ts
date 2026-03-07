@@ -10,7 +10,7 @@ export interface Quotation {
   id: string;
   bankName: string;
   rating: string;
-  category: 'BIG' | 'AAA' | 'AA+' | 'AA' | 'AA-';
+  category: 'BIG' | 'AAA' | 'AA+' | 'AA-';
   weekday: string; // 起息日
   tenor: string;
   yieldRate: string; // 包含 ↑ 符号

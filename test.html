@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NCD 报价系统 - 本地测试环境</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            border-radius: 24px;
+            padding: 48px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            max-width: 600px;
+            width: 100%;
+            text-align: center;
+        }
+        .logo {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+        h1 {
+            color: #1a202c;
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .subtitle {
+            color: #718096;
+            font-size: 14px;
+            margin-bottom: 32px;
+        }
+        .status {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: #f0fff4;
+            border: 1px solid #9ae6b4;
+            border-radius: 9999px;
+            color: #276749;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 32px;
+        }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            background: #48bb78;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .links {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .link-card {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 20px;
+            background: #f7fafc;
+            border: 2px solid #e2e8f0;
+            border-radius: 12px;
+            text-decoration: none;
+            color: inherit;
+            transition: all 0.2s;
+        }
+        .link-card:hover {
+            background: #edf2f7;
+            border-color: #cbd5e0;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        .link-icon {
+            font-size: 32px;
+        }
+        .link-info {
+            text-align: left;
+            flex: 1;
+        }
+        .link-title {
+            font-weight: 600;
+            color: #2d3748;
+            font-size: 16px;
+        }
+        .link-desc {
+            color: #718096;
+            font-size: 13px;
+            margin-top: 4px;
+        }
+        .link-arrow {
+            font-size: 20px;
+            color: #cbd5e0;
+            transition: transform 0.2s;
+        }
+        .link-card:hover .link-arrow {
+            transform: translateX(4px);
+            color: #4299e1;
+        }
+        .divider {
+            margin: 24px 0;
+            border-top: 1px solid #e2e8f0;
+        }
+        .version-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px;
+            background: #ebf8ff;
+            border-radius: 8px;
+        }
+        .version-label {
+            color: #4299e1;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        .version-value {
+            color: #2c5282;
+            font-family: monospace;
+            font-size: 16px;
+            font-weight: 700;
+        }
+        .footer {
+            margin-top: 32px;
+            color: #a0aec0;
+            font-size: 12px;
+        }
+        .check-list {
+            text-align: left;
+            background: #fffaf0;
+            border: 1px solid #feebc8;
+            border-radius: 8px;
+            padding: 16px;
+            margin-top: 24px;
+        }
+        .check-list h3 {
+            color: #c05621;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .check-list ul {
+            list-style: none;
+            color: #744210;
+            font-size: 13px;
+        }
+        .check-list li {
+            padding: 4px 0;
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+        }
+        .check-list li::before {
+            content: '✓';
+            color: #38a169;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">🧪</div>
+        <h1>本地测试环境</h1>
+        <p class="subtitle">NCD 报价管理系统 - 开发测试入口</p>
+
+        <div class="status">
+            <span class="status-dot"></span>
+            开发服务器运行中
+        </div>
+
+        <div class="links">
+            <a href="http://localhost:5174" class="link-card">
+                <span class="link-icon">🚀</span>
+                <div class="link-info">
+                    <div class="link-title">开发测试版</div>
+                    <div class="link-desc">localhost:5174 - 实时热更新，用于新功能测试</div>
+                </div>
+                <span class="link-arrow">→</span>
+            </a>
+
+            <a href="http://localhost:5173" class="link-card">
+                <span class="link-icon">🔧</span>
+                <div class="link-info">
+                    <div class="link-title">备用开发端口</div>
+                    <div class="link-desc">localhost:5173 - 如果 5174 被占用时使用</div>
+                </div>
+                <span class="link-arrow">→</span>
+            </a>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="version-info">
+            <span class="version-label">当前版本号</span>
+            <span class="version-value" id="version">加载中...</span>
+        </div>
+
+        <div class="check-list">
+            <h3>📋 测试检查清单</h3>
+            <ul>
+                <li>复制选中功能是否正常</li>
+                <li>复制选中分期限是否带到期日</li>
+                <li>点击行是否选中并复制</li>
+                <li>Ctrl 键是否可多选</li>
+                <li>拖拽是否可批量选择</li>
+                <li>类别下拉是否可修改</li>
+                <li>收益率输入是否正常</li>
+                <li>量输入是否自动加"亿"</li>
+                <li>看板格式是否统一美观</li>
+                <li>新增报价是否成功</li>
+            </ul>
+        </div>
+
+        <div class="footer">
+            开发服务器会自动热更新代码变更<br>
+            部署前请确保所有测试项通过
+        </div>
+    </div>
+
+    <script>
+        // 尝试从开发服务器获取版本号
+        fetch('http://localhost:5174')
+            .then(res => res.text())
+            .then(html => {
+                // 简单解析 HTML 查找版本号
+                const match = html.match(/v?(\d{8})/);
+                if (match) {
+                    document.getElementById('version').textContent = match[1];
+                } else {
+                    document.getElementById('version').textContent = '20260305';
+                }
+            })
+            .catch(() => {
+                document.getElementById('version').textContent = '20260305';
+            });
+
+        // 检查开发服务器状态
+        setInterval(() => {
+            fetch('http://localhost:5174', { method: 'HEAD' })
+                .then(res => {
+                    if (res.ok) {
+                        document.querySelector('.status').innerHTML = '<span class="status-dot"></span> 开发服务器运行中';
+                        document.querySelector('.status').style.background = '#f0fff4';
+                        document.querySelector('.status').style.borderColor = '#9ae6b4';
+                        document.querySelector('.status').style.color = '#276749';
+                    }
+                })
+                .catch(() => {
+                    document.querySelector('.status').innerHTML = '<span class="status-dot" style="background:#f56565"></span> 开发服务器已断开';
+                    document.querySelector('.status').style.background = '#fff5f5';
+                    document.querySelector('.status').style.borderColor = '#feb2b2';
+                    document.querySelector('.status').style.color = '#c53030';
+                });
+        }, 5000);
+    </script>
+</body>
+</html>

@@ -75,7 +75,7 @@ router.post('/ai/parse-quotation', async (req, res) => {
       解析输入的 NCD 报价文本，将其转换为 JSON 数组。
       1. bankName: 提取银行名称。
       2. rating: 评级，如 AAA, AA+。
-      3. category: 根据银行属性选择 'BIG' (大行/股份制), 'AAA' (AAA级城农商), 'AAplus' (AA+级), 或 'AA_BELOW'。
+      3. category: 根据银行属性选择 'BIG' (大行/股份制), 'AAA' (AAA级城农商), 'AA+', 'AA' (AA+级), 或 'AA-'。
       4. tenor: 统一为 1M, 3M, 6M, 9M, 1Y。
       5. yieldRate: 仅提取数字，如 "1.62"。
       6. volume: 提取如 "40e" 或 "20亿"。
@@ -91,7 +91,7 @@ router.post('/ai/parse-quotation', async (req, res) => {
             properties: {
               bankName: { type: Type.STRING },
               rating: { type: Type.STRING },
-              category: { type: Type.STRING, enum: ['BIG', 'AAA', 'AAplus', 'AA_BELOW'] },
+              category: { type: Type.STRING, enum: ['BIG', 'AAA', 'AA+'] },
               tenor: { type: Type.STRING },
               yieldRate: { type: Type.STRING },
               volume: { type: Type.STRING },

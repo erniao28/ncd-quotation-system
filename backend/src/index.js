@@ -14,8 +14,8 @@ dotenv.config();
 const app = express();
 const httpServer = createServer(app);
 
-// 配置 CORS
-const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost:5173';
+// 配置 CORS - 允许所有本地端口和服务器
+const corsOrigin = process.env.CORS_ORIGIN || '*';
 app.use(cors({
   origin: corsOrigin,
   credentials: true
@@ -49,7 +49,7 @@ async function startServer() {
     setupSocket(io);
 
     // 启动服务器
-    const PORT = process.env.PORT || 3000;
+    let PORT = process.env.PORT || 3000;
     httpServer.listen(PORT, () => {
       console.log(`
 ╔═══════════════════════════════════════════════════╗

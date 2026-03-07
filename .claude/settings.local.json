@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd \"E:/file/project_ai/cc_test/cd_test/frontend\" && npm run dev 2>&1)",
+      "Bash(cd /e/file/project_ai/cc_test/cd_test/backend/src && sed -i \"s/AA_BELOW/AA-/g\" routes/ai.js && sed -i \"s/AAplus/AA+/g\" routes/ai.js)",
+      "Bash(cd /e/file/project_ai/cc_test/cd_test/frontend/services && sed -i \"s/getCategory\\(bankName || ''\\)/getCategory\\(bankName || '', 'AAA'\\)/g\" parser.ts && sed -i \"s/getCategory\\(bankName || parsed.bankName\\)/getCategory\\(bankName || parsed.bankName, parsed.rating\\)/g\" parser.ts)",
+      "Bash(cd /e/file/project_ai/cc_test/cd_test/frontend && sed -i '/<option value=\"AA-\">AA-<\\\\/option>/d' App.tsx)",
+      "Bash(cd /e/file/project_ai/cc_test/cd_test/frontend && sed -i \"s/'AA-': 4//g\" App.tsx && sed -i \"s/'AA': 3,/'AA': 3/g\" App.tsx && sed -i \"s/> AA-</>AA</g\" App.tsx)",
+      "Bash(cd /e/file/project_ai/cc_test/cd_test/frontend && npm run build 2>&1 | head -100)",
+      "Bash(cd /e/file/project_ai/cc_test/cd_test/frontend && sed -i \"s/<option value=\\\\\"AA\\\\\">AA<\\\\/option>//g\" App.tsx)",
+      "Bash(cd /e/file/project_ai/cc_test/cd_test/frontend && npm run build 2>&1)",
+      "Bash(npm run build 2>&1)",
+      "Bash(ls -la E:/file/project_ai/cc_test/cd_test/*.md 2>/dev/null || echo \"No .md files in root\")",
+      "Bash(cd E:/file/project_ai/cc_test/cd_test/frontend && npm run build 2>&1)"
+    ]
+  }
+}

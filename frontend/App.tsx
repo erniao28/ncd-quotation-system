@@ -49,9 +49,22 @@ const App: React.FC = () => {
   const [copySuccessMsg, setCopySuccessMsg] = useState('');
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
+  // 双击编辑模式 - 记录哪个 ID 处于编辑状态
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  // 编辑中的收益率值（本地状态）
+  const [editingYieldRate, setEditingYieldRate] = useState<string>('');
+
+  // 同步到期日面板折叠状态
+  const [isMaturityPanelCollapsed, setIsMaturityPanelCollapsed] = useState(false);
+
+  // 解析报价面板折叠状态
+  const [isQuotePanelCollapsed, setIsQuotePanelCollapsed] = useState(false);
+
   // 拖动多选功能
   const [isDragging, setIsDragging] = useState(false);
   const [dragMode, setDragMode] = useState<'select' | 'deselect'>('select');
+  const [dragStartIndex, setDragStartIndex] = useState<number | null>(null);
 
   // 撤销功能的历史记录
   const [history, setHistory] = useState<Quotation[][]>([]);
@@ -294,15 +307,19 @@ const App: React.FC = () => {
     // 对收益率进行精度处理
     let finalValue = value;
     if (field === 'yieldRate') {
-      // 保留涨跌标记
-      const direction = value.includes('↑') ? '↑' : value.includes('↓') ? '↓' : '';
+      // 先从当前数据中获取原有的收益率和涨跌标记
+      const currentQuote = allQuotes.find(q => q.id === id);
+      const oldYield = currentQuote?.yieldRate || '';
+      const oldCleanYield = parseFloat(oldYield.replace(/[↑↓%]/g, ''));
+
+      // 从新值中提取数字（去掉所有非数字字符）
       const cleanRateStr = value.replace(/[^\d.]/g, '');
       const rateVal = parseFloat(cleanRateStr);
+
       if (!isNaN(rateVal)) {
         // 格式化为 4 位小数，然后去掉末尾多余的 0，但至少保留 2 位小数
         let formattedRate = rateVal.toFixed(4);
         // 去掉末尾多余的 0，但至少保留 2 位小数
-        // 例如：1.5000 -> 1.50, 1.5050 -> 1.505, 1.5005 -> 1.5005
         formattedRate = formattedRate.replace(/(\.\d\d[1-9])0+$|(\.\d\d)0+$/, '$1$2');
         // 如果小数点后不足 2 位，补足 2 位
         if (!formattedRate.includes('.')) {
@@ -313,6 +330,18 @@ const App: React.FC = () => {
             formattedRate = formattedRate + '0'.repeat(2 - decimalPart.length);
           }
         }
+
+        // 比较新旧值，决定涨跌标记
+        let direction = '';
+        if (!isNaN(oldCleanYield)) {
+          if (rateVal > oldCleanYield) {
+            direction = '↑'; // 提价
+          } else if (rateVal < oldCleanYield) {
+            direction = '↓'; // 降价
+          }
+          // 如果相等，不添加标记（保持正常蓝色）
+        }
+
         finalValue = formattedRate + direction;
       }
     }
@@ -347,7 +376,7 @@ const App: React.FC = () => {
       } else {
         // 非 Ctrl 点击：如果已选中则取消，如果未选中则单选该项
         if (newSet.has(id)) {
-          newSet.delete(id);
+          newSet.clear();
         } else {
           newSet.clear();
           newSet.add(id);
@@ -492,7 +521,7 @@ const App: React.FC = () => {
   const groupedQuotes = useMemo(() => {
     const groups: Record<string, GroupedQuotation> = {};
     const tenorOrder = ['1M', '3M', '6M', '9M', '1Y'];
-    const ratingOrder: Record<string, number> = { 'BIG': 0, 'AAA': 1, 'AA+': 2, 'AA': 3, 'AA-': 4 };
+    const ratingOrder: Record<string, number> = { 'BIG': 0, 'AAA': 1, 'AA+': 2 };
 
     filteredQuotes.forEach(q => {
       if (!groups[q.tenor]) {
@@ -525,13 +554,11 @@ const App: React.FC = () => {
   }, [filteredQuotes]);
 
   const exportText = useMemo(() => {
-    // 按评级排序：大行 > AAA > AA+ > AA > AA-
+    // 按评级排序：大行 > AAA > AA+
     const ratingOrder: Record<string, number> = {
       'BIG': 0,
       'AAA': 1,
-      'AA+': 2,
-      'AA': 3,
-      'AA-': 4
+      'AA+': 2
     };
 
     const sortedGroupedQuotes = groupedQuotes.map(g => {
@@ -638,6 +665,60 @@ const App: React.FC = () => {
     setTimeout(() => setCopyFeedback(false), 2000);
   };
 
+  // 批量调整选中报价的收益率（±0.5bp）
+  const handleAdjustYield = (adjustment: number) => {
+    if (selectedQuotes.size === 0) {
+      alert('请先选择要调整的报价');
+      return;
+    }
+
+    // 推入历史记录
+    pushHistory(allQuotes);
+
+    // 根据调整方向确定符号
+    const directionSymbol = adjustment > 0 ? '↑' : '↓';
+
+    // 更新选中的报价
+    setAllQuotes(prev => prev.map(q => {
+      if (!selectedQuotes.has(q.id)) return q;
+
+      // 提取收益率数字（去掉 ↑↓ 符号）
+      const currentYield = parseFloat(q.yieldRate.replace(/[↑↓]/g, ''));
+      if (isNaN(currentYield)) return q;
+
+      // 调整收益率（0.5bp = 0.005%）
+      const newYield = currentYield + adjustment;
+      if (newYield < 0) return q; // 不允许负收益率
+
+      // 格式化：最多 4 位小数，至少 2 位
+      let formatted = newYield.toFixed(4).replace(/(\.\d{2,})0+$/, '$1');
+      if (!formatted.includes('.')) formatted += '.00';
+      else if (formatted.split('.')[1].length < 2) formatted = newYield.toFixed(2);
+
+      // 添加方向符号
+      return { ...q, yieldRate: formatted + directionSymbol };
+    }));
+
+    // 同步更新后端
+    selectedQuotes.forEach(async (id) => {
+      const quote = allQuotes.find(q => q.id === id);
+      if (!quote) return;
+
+      const currentYield = parseFloat(quote.yieldRate.replace(/[↑↓]/g, ''));
+      const newYield = currentYield + adjustment;
+      if (newYield < 0) return;
+
+      let formatted = newYield.toFixed(4).replace(/(\.\d{2,})0+$/, '$1');
+      if (!formatted.includes('.')) formatted += '.00';
+      else if (formatted.split('.')[1].length < 2) formatted = newYield.toFixed(2);
+
+      await updateQuotationApi(id, { yieldRate: formatted + directionSymbol });
+      emitQuotationUpdate({ ...quote, yieldRate: formatted + directionSymbol });
+    });
+
+    // 不清空选中，允许连续调整
+  };
+
   // 复制看板为图片
   const handleCopyCardAsImage = async () => {
     const cardElement = document.getElementById('capture-area');
@@ -651,7 +732,24 @@ const App: React.FC = () => {
       const canvas = await html2canvas(cardElement, {
         scale: 2,
         useCORS: true,
-        backgroundColor: '#ffffff'
+        backgroundColor: '#ffffff',
+        scrollX: 0,
+        scrollY: 0,
+        windowWidth: cardElement.offsetWidth,
+        windowHeight: cardElement.offsetHeight,
+        logging: false,
+        ignoreElements: (element) => {
+          // 不排除任何元素
+          return false;
+        },
+        onclone: (clonedDoc) => {
+          // 确保克隆的元素没有 overflow 隐藏问题
+          const cloned = clonedDoc.getElementById('capture-area');
+          if (cloned) {
+            cloned.style.overflow = 'visible';
+            cloned.style.width = cardElement.offsetWidth + 'px';
+          }
+        }
       });
 
       // 转换为 base64 用于预览
@@ -707,13 +805,16 @@ const App: React.FC = () => {
     }
   };
 
-  const toggleSelect = (id: string) => {
+  const toggleSelect = (id: string, isChecked?: boolean) => {
     setSelectedQuotes(prev => {
       const newSet = new Set(prev);
-      if (newSet.has(id)) {
-        newSet.delete(id);
-      } else {
+      // 如果传入了 isChecked 参数，直接使用；否则切换状态
+      const targetState = isChecked !== undefined ? isChecked : !newSet.has(id);
+
+      if (targetState) {
         newSet.add(id);
+      } else {
+        newSet.delete(id);
       }
       return newSet;
     });
@@ -722,24 +823,32 @@ const App: React.FC = () => {
   // 记录拖动开始的复选框 ID
   const [dragStartId, setDragStartId] = useState<string | null>(null);
 
-  // 拖动选择开始 - 立即切换第一个复选框
-  const handleDragStart = (id: string, isChecked: boolean) => {
+  // 拖动选择开始 - 只记录状态，不立即切换（在 onMouseUp 时切换）
+  const handleDragStart = (id: string, isChecked: boolean, index: number) => {
     setDragStartId(id);
+    setDragStartIndex(index);
     setIsDragging(true);
     setDragMode(isChecked ? 'deselect' : 'select');
-    // 立即切换第一个复选框的状态
-    toggleSelect(id);
   };
 
-  // 拖动经过
-  const handleDragEnter = (id: string) => {
-    if (!isDragging || id === dragStartId) return;
+  // 拖动经过 - 基于索引范围选择
+  const handleDragEnter = (id: string, index: number) => {
+    if (!isDragging || dragStartIndex === null) return;
+
     setSelectedQuotes(prev => {
       const newSet = new Set(prev);
-      if (dragMode === 'select') {
-        newSet.add(id);
-      } else {
-        newSet.delete(id);
+      const start = Math.min(dragStartIndex, index);
+      const end = Math.max(dragStartIndex, index);
+
+      // 获取当前可见的所有 ID
+      const visibleIds = sortedListQuotes.slice(start, end + 1).map(q => q.id);
+
+      for (const cid of visibleIds) {
+        if (dragMode === 'select') {
+          newSet.add(cid);
+        } else {
+          newSet.delete(cid);
+        }
       }
       return newSet;
     });
@@ -749,6 +858,7 @@ const App: React.FC = () => {
   const handleDragEnd = (id: string) => {
     setIsDragging(false);
     setDragStartId(null);
+    setDragStartIndex(null);
   };
 
   // 全局鼠标抬起事件，结束拖动
@@ -805,6 +915,38 @@ const App: React.FC = () => {
           <button onClick={handleCopyCardAsImage} className="px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-700 transition-all">
             生成图片
           </button>
+          <button
+            onClick={() => setIsMaturityPanelCollapsed(!isMaturityPanelCollapsed)}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${isMaturityPanelCollapsed ? 'bg-orange-500 text-white hover:bg-orange-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+            title={isMaturityPanelCollapsed ? '展开同步到期日' : '折叠同步到期日'}
+          >
+            {isMaturityPanelCollapsed ? '▶ 到期日' : '▼ 到期日'}
+          </button>
+          <button
+            onClick={() => setIsQuotePanelCollapsed(!isQuotePanelCollapsed)}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${isQuotePanelCollapsed ? 'bg-indigo-500 text-white hover:bg-indigo-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+            title={isQuotePanelCollapsed ? '展开解析报价' : '折叠解析报价'}
+          >
+            {isQuotePanelCollapsed ? '▶ 解析报价' : '▼ 解析报价'}
+          </button>
+          <div className="flex items-center gap-1 border-l border-slate-300 pl-3 ml-1">
+            <button
+              onClick={() => handleAdjustYield(0.005)}
+              disabled={selectedQuotes.size === 0}
+              className={`px-2 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedQuotes.size > 0 ? 'bg-red-100 text-red-600 hover:bg-red-200' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}
+              title="选中收益率 +0.5bp"
+            >
+              ↑+0.5bp
+            </button>
+            <button
+              onClick={() => handleAdjustYield(-0.005)}
+              disabled={selectedQuotes.size === 0}
+              className={`px-2 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedQuotes.size > 0 ? 'bg-emerald-100 text-emerald-600 hover:bg-emerald-200' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}
+              title="选中收益率 -0.5bp"
+            >
+              ↓-0.5bp
+            </button>
+          </div>
           <button onClick={handleCopyAll} className={`px-3 py-1.5 rounded-xl text-xs font-bold shadow-lg transition-all ${copyFeedback ? 'bg-emerald-500 text-white' : 'bg-slate-900 text-white hover:bg-slate-800'}`}>
             {copyFeedback ? '复制成功' : '复制全部'}
           </button>
@@ -814,18 +956,21 @@ const App: React.FC = () => {
 
       <main className="max-w-[1400px] mx-auto p-6 grid grid-cols-12 gap-6 w-full">
         <div className="col-span-12 lg:col-span-4 space-y-4">
-          <section className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-            <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-orange-400"></span> 1. 同步到期日
-            </h2>
-            <textarea
-              value={maturityInput}
-              onChange={e => setMaturityInput(e.target.value)}
-              className="w-full h-16 p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono outline-none focus:border-orange-200 transition-all resize-none"
-              placeholder="粘贴包含 (1M 到期日 2025/10/16 周四) 的文本..."
-            ></textarea>
-            <button onClick={handleSyncMaturity} className="w-full mt-2 py-1.5 bg-orange-50 text-orange-600 rounded-xl text-xs font-bold hover:bg-orange-100">解析到期日</button>
-          </section>
+          {/* 同步到期日面板 - 可折叠 */}
+          {!isMaturityPanelCollapsed && (
+            <section className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+              <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-orange-400"></span> 1. 同步到期日
+              </h2>
+              <textarea
+                value={maturityInput}
+                onChange={e => setMaturityInput(e.target.value)}
+                className="w-full h-16 p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono outline-none focus:border-orange-200 transition-all resize-none"
+                placeholder="粘贴包含 (1M 到期日 2025/10/16 周四) 的文本..."
+              ></textarea>
+              <button onClick={handleSyncMaturity} className="w-full mt-2 py-1.5 bg-orange-50 text-orange-600 rounded-xl text-xs font-bold hover:bg-orange-100">解析到期日</button>
+            </section>
+          )}
 
           {recognizedMaturities.length > 0 && (
             <div className="bg-slate-900 p-4 rounded-2xl shadow-2xl animate-in slide-in-from-bottom-4">
@@ -907,7 +1052,8 @@ const App: React.FC = () => {
             </div>
           )}
 
-          <section className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+          {!isQuotePanelCollapsed && (
+            <section className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
              <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-1.5">
                <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span> 2. 解析新报价
              </h2>
@@ -925,8 +1071,10 @@ const App: React.FC = () => {
                {isParsing ? '正在解析...' : '解析报价'}
              </button>
           </section>
+          )}
 
-          {recognizedQuotes.length > 0 && (
+          {/* 解析报价结果 - 可折叠 */}
+          {!isQuotePanelCollapsed && recognizedQuotes.length > 0 && (
             <div className="bg-slate-900 p-4 rounded-2xl shadow-2xl animate-in slide-in-from-bottom-4">
               <h3 className="text-xs font-bold text-slate-400 mb-3 uppercase tracking-widest">解析结果确认 - 可编辑 ({recognizedQuotes.length})</h3>
               <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar text-white">
@@ -994,8 +1142,7 @@ const App: React.FC = () => {
                         >
                           <option value="AAA">AAA</option>
                           <option value="AA+">AA+</option>
-                          <option value="AA">AA</option>
-                          <option value="AA-">AA-</option>
+                          
                         </select>
                       </div>
                       {/* 类别 */}
@@ -1013,8 +1160,7 @@ const App: React.FC = () => {
                           <option value="BIG">大行</option>
                           <option value="AAA">AAA</option>
                           <option value="AA+">AA+</option>
-                          <option value="AA">AA</option>
-                          <option value="AA-">AA-</option>
+                          
                         </select>
                       </div>
                       {/* 星期 */}
@@ -1090,8 +1236,7 @@ const App: React.FC = () => {
                     <option value="BIG">大行</option>
                     <option value="AAA">AAA</option>
                     <option value="AA+">AA+</option>
-                    <option value="AA">AA</option>
-                    <option value="AA-">AA-</option>
+                    
                  </select>
                  <select
                   value={sortBy}
@@ -1112,12 +1257,12 @@ const App: React.FC = () => {
             </div>
 
             {activeTab === 'VISUAL' && (
-              <VisualCard groupedQuotes={groupedQuotes} onEditMaturity={handleUpdateMaturity} />
+              <VisualCard groupedQuotes={groupedQuotes} onEditMaturity={handleUpdateMaturity} expanded={isMaturityPanelCollapsed && isQuotePanelCollapsed} />
             )}
 
             {activeTab === 'TEXT' && (
-              <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 flex-1 flex flex-col">
-                <div className="flex justify-between items-center mb-6">
+              <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 flex-1 flex flex-col overflow-hidden">
+                <div className="flex justify-between items-center mb-6 shrink-0">
                   <div className="flex items-center gap-4">
                     <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">文字版 (自动保存)</h3>
                     <button onClick={selectAll} className="text-[10px] font-bold text-indigo-400 hover:text-indigo-600">
@@ -1126,60 +1271,212 @@ const App: React.FC = () => {
                   </div>
                   <button onClick={async () => {if(confirm('清空所有？')) {await deleteAllQuotations(); setAllQuotes([]);}}} className="text-[10px] font-bold text-red-400 hover:text-red-600 uppercase">Clear All</button>
                 </div>
-                <div className="space-y-8 flex-1">
-                  {groupedQuotes.map((group, idx) => (
-                    <div key={idx} className="font-mono text-sm">
-                      <div className="text-indigo-600 font-bold mb-4 flex items-center">
-                        <span className="bg-indigo-50 px-3 py-1 rounded-lg">({group.tenor} 到期日 {group.maturityDate} {group.maturityWeekday})</span>
-                        <div className="h-px bg-slate-200 flex-1 ml-4"></div>
+                <div className="space-y-6 flex-1 overflow-y-auto">
+                  {groupedQuotes.map((group, groupIdx) => (
+                    <div key={groupIdx} className="font-mono text-sm">
+                      <div className="text-indigo-600 font-bold mb-3 flex items-center sticky top-0 bg-slate-50 z-10">
+                        <span className="bg-indigo-50 px-2 py-0.5 rounded text-[10px] whitespace-nowrap">({group.tenor} 到期日 {group.maturityDate} {group.maturityWeekday})</span>
+                        <div className="h-px bg-slate-200 flex-1 ml-2"></div>
                       </div>
-                      <div className="space-y-2">
-                        {group.items.map(item => (
-                          <div key={item.id} className="flex flex-wrap gap-1.5 items-center group py-1.5 hover:bg-white rounded-lg px-3 transition-colors">
+                      <div className="space-y-1">
+                        {group.items.map((item, itemIdx) => {
+                          // 计算在 filteredQuotes 中的全局索引
+                          const globalIndex = filteredQuotes.findIndex(q => q.id === item.id);
+                          const isSelected = selectedQuotes.has(item.id);
+                          // 双击编辑模式 - 只有在 editingId 匹配时才可编辑
+                          const isEditable = editingId === item.id;
+                          return (
+                          <div key={item.id} className={`flex flex-nowrap gap-1 items-center group py-1 px-2 rounded transition-colors ${
+                            isSelected ? 'bg-indigo-100 border border-indigo-300' : 'hover:bg-white'
+                          }`}
+                            onClick={(e) => {
+                              // 点击行任意位置：切换选中 + 复制
+                              e.stopPropagation();
+                              toggleSelect(item.id);
+                              // 复制该行
+                              const text = `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}${item.volume ? ' ' + item.volume : ''}${item.remarks ? ' ' + item.remarks : ''}`.trim();
+                              copyToClipboard(text);
+                              setCopySuccessMsg('已复制');
+                              setTimeout(() => setCopySuccessMsg(''), 1500);
+                            }}
+                            onMouseDown={(e) => {
+                              // 按下鼠标开始拖曳
+                              e.preventDefault();
+                              e.stopPropagation();
+                              handleDragStart(item.id, isSelected, globalIndex);
+                            }}
+                            onMouseEnter={() => {
+                              handleDragEnter(item.id, globalIndex);
+                            }}
+                            onMouseUp={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              handleDragEnd(item.id);
+                            }}
+                          >
                             <input
                               type="checkbox"
-                              checked={selectedQuotes.has(item.id)}
-                              onChange={() => toggleSelect(item.id)}
-                              className="w-4 h-4 text-indigo-600 rounded"
-                            />
-                            <input
-                              className="w-28 font-bold bg-transparent border-none focus:bg-white outline-none p-0 text-slate-900"
-                              value={item.bankName}
-                              onChange={e => handleUpdateQuote(item.id, 'bankName', e.target.value)}
-                            />
-                            <select
-                              className="w-10 text-slate-400 text-xs bg-transparent outline-none cursor-pointer"
-                              value={item.rating}
-                              onChange={e => handleUpdateQuote(item.id, 'rating', e.target.value)}
-                            >
-                              <option value="AAA">AAA</option>
-                              <option value="AA+">AA+</option>
-                              <option value="AA">AA</option>
-                              <option value="AA-">AA-</option>
-                            </select>
-                            <input className="w-8 text-slate-400 text-xs bg-transparent" value={item.weekday} onChange={e => handleUpdateQuote(item.id, 'weekday', e.target.value)} />
-                            <input
-                              className={`w-20 font-bold text-right outline-none bg-transparent ${item.yieldRate.includes('↑') ? 'text-red-600' : item.yieldRate.includes('↓') ? 'text-emerald-600' : 'text-blue-600'}`}
-                              value={item.yieldRate}
-                              onChange={e => handleUpdateQuote(item.id, 'yieldRate', e.target.value)}
-                            />
-                            <input className="w-12 text-slate-400 text-xs text-center" value={item.volume} placeholder="量" onChange={e => handleUpdateQuote(item.id, 'volume', e.target.value)} />
-                            <input className="flex-1 text-slate-400 italic text-xs truncate" value={item.remarks} placeholder="备注" onChange={e => handleUpdateQuote(item.id, 'remarks', e.target.value)} />
-                            <button
-                              onClick={() => {
+                              checked={isSelected}
+                              onChange={(e) => {
+                                e.stopPropagation();
+                                toggleSelect(item.id, e.target.checked);
+                                // 复制该行
                                 const text = `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}${item.volume ? ' ' + item.volume : ''}${item.remarks ? ' ' + item.remarks : ''}`.trim();
                                 copyToClipboard(text);
                                 setCopySuccessMsg('已复制');
                                 setTimeout(() => setCopySuccessMsg(''), 1500);
                               }}
-                              className="opacity-0 group-hover:opacity-100 text-blue-300 hover:text-blue-500 transition-all text-xs font-bold"
-                              title="复制此行"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                              }}
+                              className="w-3.5 h-3.5 text-indigo-600 rounded shrink-0 cursor-pointer"
+                              title="点击选中，或拖曳批量选择"
+                            />
+                            <input
+                              className="w-20 font-bold bg-transparent border-none focus:bg-white outline-none p-0 text-slate-900 text-[10px] shrink-0"
+                              value={item.bankName}
+                              readOnly={!isEditable}
+                              onDoubleClick={(e) => {
+                                e.stopPropagation();
+                                setEditingId(item.id);
+                                (e.target as HTMLInputElement).focus();
+                              }}
+                              onBlur={() => setEditingId(null)}
+                              onChange={e => handleUpdateQuote(item.id, 'bankName', e.target.value)}
+                              data-bank-name={item.id}
+                            />
+                            <select
+                              className="w-10 text-slate-400 text-[9px] bg-transparent outline-none cursor-pointer shrink-0"
+                              value={item.rating}
+                              disabled={!isEditable}
+                              onBlur={() => setEditingId(null)}
+                              onChange={e => {
+                                e.stopPropagation();
+                                handleUpdateQuote(item.id, 'rating', e.target.value);
+                              }}
                             >
-                              复制
+                              <option value="AAA">AAA</option>
+                              <option value="AA+">AA+</option>
+                              <option value="AA-">AA-</option>
+                            </select>
+                            <select
+                              className="w-14 text-[8px] px-0.5 py-0.5 rounded font-bold cursor-pointer outline-none bg-white border border-slate-200 shrink-0"
+                              value={item.category}
+                              disabled={!isEditable}
+                              onBlur={() => setEditingId(null)}
+                              onChange={e => {
+                                e.stopPropagation();
+                                handleUpdateQuote(item.id, 'category', e.target.value as any);
+                              }}
+                            >
+                              <option value="BIG">大行&国股</option>
+                              <option value="AAA">AAA 城农商</option>
+                              <option value="AA+">AA+</option>
+                              <option value="AA-">AA-</option>
+                            </select>
+                            <input className="w-5 text-slate-400 text-[8px] bg-transparent shrink-0" value={item.weekday} readOnly={!isEditable} onDoubleClick={(e) => { e.stopPropagation(); setEditingId(item.id); (e.target as HTMLInputElement).focus(); }} onBlur={() => setEditingId(null)} onChange={e => handleUpdateQuote(item.id, 'weekday', e.target.value)} />
+                            <input
+                              className={`w-14 font-bold text-right outline-none bg-transparent text-[10px] shrink-0 ${item.yieldRate.includes('↑') ? 'text-red-600' : item.yieldRate.includes('↓') ? 'text-emerald-600' : 'text-blue-600'}`}
+                              value={isEditable ? editingYieldRate : item.yieldRate.replace(/%|↑|↓/g, '')}
+                              placeholder="收益率"
+                              readOnly={!isEditable}
+                              onDoubleClick={(e) => {
+                                e.stopPropagation();
+                                setEditingId(item.id);
+                                // 初始化编辑值为当前值
+                                setEditingYieldRate(item.yieldRate.replace(/%|↑|↓/g, ''));
+                                const input = (e.target as HTMLInputElement);
+                                input.focus();
+                              }}
+                              onBlur={(e) => {
+                                setEditingId(null);
+                                // 失去焦点时提交最终值
+                                const val = e.target.value.replace(/[^\d.]/g, '');
+                                if (val && val !== item.yieldRate.replace(/%|↑|↓/g, '')) {
+                                  handleUpdateQuote(item.id, 'yieldRate', val);
+                                }
+                                setEditingYieldRate('');
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.stopPropagation();
+                                  // 先提交值再退出
+                                  const val = (e.target as HTMLInputElement).value.replace(/[^\d.]/g, '');
+                                  if (val && val !== item.yieldRate.replace(/%|↑|↓/g, '')) {
+                                    handleUpdateQuote(item.id, 'yieldRate', val);
+                                  }
+                                  setEditingId(null);
+                                  setEditingYieldRate('');
+                                  // 选中并复制
+                                  toggleSelect(item.id);
+                                  const text = `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}${item.volume ? ' ' + item.volume : ''}${item.remarks ? ' ' + item.remarks : ''}`.trim();
+                                  copyToClipboard(text);
+                                  setCopySuccessMsg('已复制');
+                                  setTimeout(() => setCopySuccessMsg(''), 1500);
+                                }
+                              }}
+                              onChange={(e) => {
+                                // 更新本地编辑状态，允许自由编辑
+                                const val = e.target.value.replace(/[^\d.]/g, '');
+                                setEditingYieldRate(val);
+                              }}
+                            />
+                            <input
+                              className="w-14 text-slate-400 text-[8px] text-center bg-transparent shrink-0"
+                              value={item.volume ? item.volume.replace(/亿 | 元/g, '') : ''}
+                              placeholder="量"
+                              readOnly={!isEditable}
+                              onDoubleClick={(e) => { e.stopPropagation(); setEditingId(item.id); (e.target as HTMLInputElement).focus(); }}
+                              onBlur={() => setEditingId(null)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.stopPropagation();
+                                  setEditingId(null);
+                                  toggleSelect(item.id);
+                                  const text = `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}${item.volume ? ' ' + item.volume : ''}${item.remarks ? ' ' + item.remarks : ''}`.trim();
+                                  copyToClipboard(text);
+                                  setCopySuccessMsg('已复制');
+                                  setTimeout(() => setCopySuccessMsg(''), 1500);
+                                }
+                              }}
+                              onChange={e => {
+                                const val = e.target.value.replace(/[^0-9.]/g, '');
+                                handleUpdateQuote(item.id, 'volume', val ? val + '亿元' : '');
+                              }}
+                            />
+                            <input
+                              className="w-20 text-slate-400 italic text-[8px] truncate bg-transparent shrink-0"
+                              value={item.remarks || ''}
+                              placeholder="备注"
+                              readOnly={!isEditable}
+                              onDoubleClick={(e) => { e.stopPropagation(); setEditingId(item.id); (e.target as HTMLInputElement).focus(); }}
+                              onBlur={() => setEditingId(null)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.stopPropagation();
+                                  setEditingId(null);
+                                  toggleSelect(item.id);
+                                  const text = `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}${item.volume ? ' ' + item.volume : ''}${item.remarks ? ' ' + item.remarks : ''}`.trim();
+                                  copyToClipboard(text);
+                                  setCopySuccessMsg('已复制');
+                                  setTimeout(() => setCopySuccessMsg(''), 1500);
+                                }
+                              }}
+                              onChange={e => handleUpdateQuote(item.id, 'remarks', e.target.value)}
+                            />
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteQuote(item.id);
+                              }}
+                              className="text-red-300 hover:text-red-500 transition-all text-[9px] font-bold shrink-0 ml-auto"
+                              title="删除"
+                            >
+                              删除
                             </button>
-                            <button onClick={() => handleDeleteQuote(item.id)} className="opacity-0 group-hover:opacity-100 text-red-300 hover:text-red-500 transition-all text-xs font-bold">删除</button>
                           </div>
-                        ))}
+                        );
+                        })}
                       </div>
                     </div>
                   ))}
@@ -1219,19 +1516,50 @@ const App: React.FC = () => {
                 <div className="space-y-1.5 flex-1 overflow-y-auto">
                   {sortedListQuotes.map((item, idx) => {
                     const isSelected = selectedQuotes.has(item.id);
-                    const displayVolume = item.volume ? (item.volume.replace(/亿 | 元/g, '') + '亿') : '';
+                    // 双击编辑模式 - 只有在 editingId 匹配时才可编辑
+                    const isEditable = editingId === item.id;
                     return (
                       <div
                         key={item.id}
-                        className={`flex flex-wrap gap-1 items-center group py-1 px-2 rounded transition-colors cursor-pointer ${
+                        className={`flex flex-nowrap gap-1 items-center group py-1 px-2 rounded transition-colors ${
                           isSelected
                             ? 'bg-indigo-100 border border-indigo-300'
                             : idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'
                         }`}
                         onClick={(e) => {
-                          // 如果点击的是 input 或 button，不触发选中
-                          if (e.target instanceof HTMLInputElement || e.target instanceof HTMLButtonElement) return;
-                          handleRowClick(item.id, item, e);
+                          // 点击行任意位置：切换选中 + 复制
+                          e.stopPropagation();
+                          toggleSelect(item.id);
+                          // 复制该行
+                          const text = `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}${item.volume ? ' ' + item.volume : ''}${item.remarks ? ' ' + item.remarks : ''}`.trim();
+                          copyToClipboard(text);
+                          setCopySuccessMsg('已复制');
+                          setTimeout(() => setCopySuccessMsg(''), 1500);
+                        }}
+                        onDoubleClick={(e) => {
+                          // 双击进入编辑模式
+                          e.stopPropagation();
+                          e.preventDefault();
+                          setEditingId(item.id);
+                          // 聚焦到第一个输入框
+                          setTimeout(() => {
+                            const input = document.querySelector(`input[data-bank-name-list="${item.id}"]`) as HTMLInputElement;
+                            if (input) input.focus();
+                          }, 0);
+                        }}
+                        onMouseDown={(e) => {
+                          // 按下鼠标开始拖曳
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleDragStart(item.id, isSelected, idx);
+                        }}
+                        onMouseEnter={() => {
+                          handleDragEnter(item.id, idx);
+                        }}
+                        onMouseUp={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleDragEnd(item.id);
                         }}
                       >
                         <input
@@ -1239,97 +1567,159 @@ const App: React.FC = () => {
                           checked={isSelected}
                           onChange={(e) => {
                             e.stopPropagation();
-                            toggleSelect(item.id);
-                          }}
-                          onMouseDown={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            handleDragStart(item.id, isSelected);
-                          }}
-                          onMouseEnter={(e) => {
-                            e.preventDefault();
-                            handleDragEnter(item.id);
-                          }}
-                          onMouseUp={(e) => {
-                            e.preventDefault();
-                            handleDragEnd(item.id);
-                          }}
-                          className={`w-3.5 h-3.5 text-indigo-600 rounded cursor-pointer ${isDragging ? 'select-none' : ''}`}
-                          title="单击选中，或按住鼠标拖动批量选择"
-                        />
-                        <span className="text-[8px] text-slate-400 font-mono w-14">{new Date(item.updatedAt || item.createdAt || Date.now()).toLocaleTimeString('zh-CN', {hour12:false, hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>
-                        <input
-                          className="w-24 font-bold bg-transparent border-none focus:bg-white outline-none p-0 text-slate-900 text-[11px]"
-                          value={item.bankName}
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={e => handleUpdateQuote(item.id, 'bankName', e.target.value)}
-                        />
-                        <select
-                          className="w-10 text-slate-400 text-[10px] bg-transparent outline-none cursor-pointer"
-                          value={item.rating}
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={e => handleUpdateQuote(item.id, 'rating', e.target.value)}
-                        >
-                          <option value="AAA">AAA</option>
-                          <option value="AA+">AA+</option>
-                          <option value="AA">AA</option>
-                          <option value="AA-">AA-</option>
-                        </select>
-                        <select
-                          className="w-10 text-[8px] px-1 py-0.5 rounded font-bold cursor-pointer outline-none"
-                          value={item.category}
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={e => handleUpdateQuote(item.id, 'category', e.target.value as any)}
-                        >
-                          <option value="BIG">大行</option>
-                          <option value="AAA">AAA</option>
-                          <option value="AA+">AA+</option>
-                          <option value="AA">AA</option>
-                          <option value="AA-">AA-</option>
-                        </select>
-                        <input className="w-6 text-slate-400 text-[10px] bg-transparent" value={item.weekday} onClick={(e) => e.stopPropagation()} onChange={e => handleUpdateQuote(item.id, 'weekday', e.target.value)} />
-                        <input className="w-12 text-slate-400 text-[10px] bg-transparent" value={item.tenor} onClick={(e) => e.stopPropagation()} onChange={e => handleUpdateQuote(item.id, 'tenor', e.target.value)} />
-                        <input
-                          className={`w-16 font-bold text-right outline-none bg-transparent text-[11px] ${item.yieldRate.includes('↑') ? 'text-red-600' : item.yieldRate.includes('↓') ? 'text-emerald-600' : 'text-blue-600'}`}
-                          value={item.yieldRate}
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={e => {
-                            const val = e.target.value;
-                            // 允许输入 % 和涨跌符号
-                            const cleanVal = val.replace(/[^\d.↑↓%]/g, '');
-                            handleUpdateQuote(item.id, 'yieldRate', cleanVal);
-                          }}
-                        />
-                        <input
-                          className="w-20 text-slate-400 text-[10px] text-center outline-none"
-                          value={displayVolume}
-                          placeholder="量"
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={e => {
-                            const val = e.target.value.replace(/[^0-9.]/g, '');
-                            handleUpdateQuote(item.id, 'volume', val ? val + '亿' : '');
-                          }}
-                        />
-                        <input className="flex-1 min-w-[80px] text-slate-400 italic text-[10px] truncate" value={item.remarks} placeholder="备注" onClick={(e) => e.stopPropagation()} onChange={e => handleUpdateQuote(item.id, 'remarks', e.target.value)} />
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
+                            toggleSelect(item.id, e.target.checked);
+                            // 复制该行
                             const text = `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}${item.volume ? ' ' + item.volume : ''}${item.remarks ? ' ' + item.remarks : ''}`.trim();
                             copyToClipboard(text);
                             setCopySuccessMsg('已复制');
                             setTimeout(() => setCopySuccessMsg(''), 1500);
                           }}
-                          className="opacity-0 group-hover:opacity-100 text-blue-300 hover:text-blue-500 transition-all text-[9px] font-bold"
-                          title="复制此行"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                          }}
+                          className={`w-3.5 h-3.5 text-indigo-600 rounded cursor-pointer shrink-0 ${isDragging ? 'select-none' : ''}`}
+                          title="点击选中，或拖曳批量选择"
+                        />
+                        <span className="text-[8px] text-slate-400 font-mono w-14 shrink-0">{new Date(item.updatedAt || item.createdAt || Date.now()).toLocaleTimeString('zh-CN', {hour12:false, hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>
+                        <input
+                          className="w-20 font-bold bg-transparent border-none focus:bg-white outline-none p-0 text-slate-900 text-[10px] shrink-0"
+                          value={item.bankName}
+                          readOnly={!isEditable}
+                          onDoubleClick={(e) => {
+                            e.stopPropagation();
+                            setEditingId(item.id);
+                            (e.target as HTMLInputElement).focus();
+                          }}
+                          onBlur={() => setEditingId(null)}
+                          onChange={e => handleUpdateQuote(item.id, 'bankName', e.target.value)}
+                          data-bank-name-list={item.id}
+                        />
+                        <select
+                          className="w-10 text-slate-400 text-[9px] bg-transparent outline-none cursor-pointer shrink-0"
+                          value={item.rating}
+                          disabled={!isEditable}
+                          onBlur={() => setEditingId(null)}
+                          onChange={e => {
+                            e.stopPropagation();
+                            handleUpdateQuote(item.id, 'rating', e.target.value);
+                          }}
                         >
-                          复制
-                        </button>
+                          <option value="AAA">AAA</option>
+                          <option value="AA+">AA+</option>
+                          <option value="AA-">AA-</option>
+                        </select>
+                        <select
+                          className="w-14 text-[8px] px-0.5 py-0.5 rounded font-bold cursor-pointer outline-none bg-white border border-slate-200 shrink-0"
+                          value={item.category}
+                          disabled={!isEditable}
+                          onBlur={() => setEditingId(null)}
+                          onChange={e => {
+                            e.stopPropagation();
+                            handleUpdateQuote(item.id, 'category', e.target.value as any);
+                          }}
+                        >
+                          <option value="BIG">大行&国股</option>
+                          <option value="AAA">AAA 城农商</option>
+                          <option value="AA+">AA+</option>
+                          <option value="AA-">AA-</option>
+                        </select>
+                        <input className="w-5 text-slate-400 text-[8px] bg-transparent shrink-0" value={item.weekday} readOnly={!isEditable} onDoubleClick={(e) => { e.stopPropagation(); setEditingId(item.id); (e.target as HTMLInputElement).focus(); }} onBlur={() => setEditingId(null)} onChange={e => handleUpdateQuote(item.id, 'weekday', e.target.value)} />
+                        <input className="w-10 text-slate-400 text-[8px] bg-transparent shrink-0" value={item.tenor} readOnly={!isEditable} onDoubleClick={(e) => { e.stopPropagation(); setEditingId(item.id); (e.target as HTMLInputElement).focus(); }} onBlur={() => setEditingId(null)} onChange={e => handleUpdateQuote(item.id, 'tenor', e.target.value)} />
+                        <input
+                          className={`w-14 font-bold text-right outline-none bg-transparent text-[10px] shrink-0 ${item.yieldRate.includes('↑') ? 'text-red-600' : item.yieldRate.includes('↓') ? 'text-emerald-600' : 'text-blue-600'}`}
+                          value={isEditable ? editingYieldRate : item.yieldRate.replace(/%|↑|↓/g, '')}
+                          placeholder="收益率"
+                          readOnly={!isEditable}
+                          onDoubleClick={(e) => {
+                            e.stopPropagation();
+                            setEditingId(item.id);
+                            // 初始化编辑值为当前值
+                            setEditingYieldRate(item.yieldRate.replace(/%|↑|↓/g, ''));
+                            const input = (e.target as HTMLInputElement);
+                            input.focus();
+                          }}
+                          onBlur={(e) => {
+                            setEditingId(null);
+                            // 失去焦点时提交最终值
+                            const val = e.target.value.replace(/[^\d.]/g, '');
+                            if (val && val !== item.yieldRate.replace(/%|↑|↓/g, '')) {
+                              handleUpdateQuote(item.id, 'yieldRate', val);
+                            }
+                            setEditingYieldRate('');
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.stopPropagation();
+                              // 先提交值再退出
+                              const val = (e.target as HTMLInputElement).value.replace(/[^\d.]/g, '');
+                              if (val && val !== item.yieldRate.replace(/%|↑|↓/g, '')) {
+                                handleUpdateQuote(item.id, 'yieldRate', val);
+                              }
+                              setEditingId(null);
+                              setEditingYieldRate('');
+                              // 选中并复制
+                              toggleSelect(item.id);
+                              const text = `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}${item.volume ? ' ' + item.volume : ''}${item.remarks ? ' ' + item.remarks : ''}`.trim();
+                              copyToClipboard(text);
+                              setCopySuccessMsg('已复制');
+                              setTimeout(() => setCopySuccessMsg(''), 1500);
+                            }
+                          }}
+                          onChange={(e) => {
+                            // 更新本地编辑状态，允许自由编辑
+                            const val = e.target.value.replace(/[^\d.]/g, '');
+                            setEditingYieldRate(val);
+                          }}
+                        />
+                        <input
+                          className="w-14 text-slate-400 text-[8px] text-center bg-transparent shrink-0"
+                          value={item.volume ? item.volume.replace(/亿 | 元/g, '') : ''}
+                          placeholder="量"
+                          readOnly={!isEditable}
+                          onDoubleClick={(e) => { e.stopPropagation(); setEditingId(item.id); (e.target as HTMLInputElement).focus(); }}
+                          onBlur={() => setEditingId(null)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.stopPropagation();
+                              setEditingId(null);
+                              toggleSelect(item.id);
+                              const text = `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}${item.volume ? ' ' + item.volume : ''}${item.remarks ? ' ' + item.remarks : ''}`.trim();
+                              copyToClipboard(text);
+                              setCopySuccessMsg('已复制');
+                              setTimeout(() => setCopySuccessMsg(''), 1500);
+                            }
+                          }}
+                          onChange={e => {
+                            const val = e.target.value.replace(/[^0-9.]/g, '');
+                            handleUpdateQuote(item.id, 'volume', val ? val + '亿元' : '');
+                          }}
+                        />
+                        <input
+                          className="w-20 text-slate-400 italic text-[8px] truncate bg-transparent shrink-0"
+                          value={item.remarks || ''}
+                          placeholder="备注"
+                          readOnly={!isEditable}
+                          onDoubleClick={(e) => { e.stopPropagation(); setEditingId(item.id); (e.target as HTMLInputElement).focus(); }}
+                          onBlur={() => setEditingId(null)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.stopPropagation();
+                              setEditingId(null);
+                              toggleSelect(item.id);
+                              const text = `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}${item.volume ? ' ' + item.volume : ''}${item.remarks ? ' ' + item.remarks : ''}`.trim();
+                              copyToClipboard(text);
+                              setCopySuccessMsg('已复制');
+                              setTimeout(() => setCopySuccessMsg(''), 1500);
+                            }
+                          }}
+                          onChange={e => handleUpdateQuote(item.id, 'remarks', e.target.value)}
+                        />
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             handleDeleteQuote(item.id);
                           }}
-                          className="opacity-0 group-hover:opacity-100 text-red-300 hover:text-red-500 transition-all text-[9px] font-bold"
+                          className="text-red-300 hover:text-red-500 transition-all text-[8px] font-bold shrink-0 ml-auto"
                         >
                           删除
                         </button>

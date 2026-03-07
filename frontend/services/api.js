@@ -1,10 +1,12 @@
 // 后端 API 服务
 import { io } from 'socket.io-client';
 
-// 直接用 IP 和端口
-// 通过 Nginx 代理（相对路径）
-const API_BASE = '/api';
-const WS_BASE = window.location.protocol + '//' + window.location.hostname;
+// 配置：本地测试直连本地后端，生产环境使用相对路径
+const IS_LOCAL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+
+// 本地测试连接本地后端，生产环境使用 Nginx 代理
+const API_BASE = IS_LOCAL ? 'http://localhost:3000/api' : '/api';
+const WS_BASE = IS_LOCAL ? 'ws://localhost:3000' : (window.location.protocol + '//' + window.location.hostname);
 
 // ========== HTTP API ==========
 

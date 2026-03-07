@@ -1,6 +1,6 @@
 {
   "name": "ncd-quotation-backend",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "NCD 报价管理系统后端",
   "main": "src/index.js",
   "type": "module",

@@ -6,7 +6,8 @@ export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     return {
       server: {
-        port: 5173,
+        port: 5180, // NCD 项目固定端口
+        strictPort: false, // 被占用时自动切换
         host: '0.0.0.0',
         proxy: {
           '/api': {

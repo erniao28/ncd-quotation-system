@@ -3,7 +3,7 @@
 const BANKS = [
   '工商银行', '农业银行', '中国银行', '建设银行', '交通银行', '邮储银行',
   '中信银行', '光大银行', '华夏银行', '广发银行', '平安银行', '招商银行',
-  '浦发银行', '兴业银行', '浙商银行', '渤海银行', '恒丰银行',
+  '浦发银行', '兴业银行', '浙商银行', '渤海银行', '恒丰银行', '民生银行',
   '北京银行', '上海银行', '江苏银行', '宁波银行', '南京银行', '杭州银行',
   '厦门国际银行', '汉口银行', '长沙银行', '成都银行', '重庆银行', '贵阳银行',
   '郑州银行', '青岛银行', '西安银行', '苏州银行', '河北银行', '哈尔滨银行',
@@ -15,6 +15,7 @@ const BANKS = [
   '齐商银行', '华兴银行', '民泰银行', '邯郸银行', '邢台银行', '沧州银行',
   '承德银行', '衡水银行', '乌海银行', '鄂尔多斯银行', '抚顺银行', '鞍山银行',
   '丹东银行', '营口银行', '阜新银行', '辽阳银行', '铁岭银行', '朝阳银行',
+  '天津银行',
   '重庆农商', '上海农商', '广州农商', '深圳农商', '东莞农商', '顺德农商',
   '天津农商', '武汉农商', '长沙农商行', '江南农商', '南海农商', '珠海农商',
   '佛山农商', '无锡农商', '常熟农商', '张家港农商', '江阴农商', '吴江农商',
@@ -50,6 +51,9 @@ const TYPO_CORRECTIONS: Record<string, string> = {
   '宁波银行': '宁波银行',
   '南京银行': '南京银行',
   '杭州银行': '杭州银行',
+  '民生银行': '民生银行',
+  '民生': '民生银行',
+  '天津银行': '天津银行',
 };
 
 // 模糊匹配阈值
@@ -110,11 +114,20 @@ function correctTypo(text: string): string {
 function findBank(text: string): string | null {
   const corrected = correctTypo(text);
 
-  // 先精确匹配
+  // 先精确匹配 - 优先匹配完整的银行名
   for (const bank of BANKS) {
-    if (corrected.includes(bank)) {
+    if (corrected === bank || corrected.includes(bank)) {
+      // 特殊处理：如果文本明确包含"浦发"，直接返回浦发银行
+      if (text.includes('浦发') || corrected.includes('浦发')) {
+        return '浦发银行';
+      }
       return bank;
     }
+  }
+
+  // 特殊检查：如果文本包含"浦发"但没匹配上
+  if (text.includes('浦发') || corrected.includes('浦发')) {
+    return '浦发银行';
   }
 
   // 模糊匹配
@@ -127,7 +140,11 @@ function findBank(text: string): string | null {
       const keyword = bank.substring(0, i);
       if (corrected.includes(keyword)) {
         const score = i / bank.length;
-        if (score > bestScore) {
+        // 浦发的优先级要提高
+        if (bank === '浦发银行' && score > 0.5) {
+          bestScore = score + 0.3; // 提高浦发银行的优先级
+          bestMatch = bank;
+        } else if (score > bestScore) {
           bestScore = score;
           bestMatch = bank;
         }
@@ -151,7 +168,7 @@ const RATING_KEYWORDS: Record<string, string[]> = {
   'AAA': ['AAA', 'aaa', '3A'],
   'AA+': ['AA+', 'aa+', 'AAplus'],
   'AA': ['AA', 'aa'],
-  'AA-': ['AA-', 'aa-'],
+  'AA-': ['AA-', 'aa-', 'AA 减'],
   'A+': ['A+', 'a+'],
   'A': ['A', 'a']
 };
@@ -166,21 +183,33 @@ const TENOR_KEYWORDS: Record<string, string[]> = {
 
 const WEEKDAY_KEYWORDS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
-function getCategory(bankName: string): string {
-  const bigBanks = ['工商银行', '农业银行', '中国银行', '建设银行', '交通银行', '邮储银行',
+function getCategory(bankName: string, rating: string = 'AAA'): string {
+  // 大行类别：包括 6 大国有银行 + 12 家全国性股份制银行
+  const bigBanks = [
+    // 6 大国有银行
+    '工商银行', '农业银行', '中国银行', '建设银行', '交通银行', '邮储银行',
+    // 12 家股份制银行
     '中信银行', '光大银行', '华夏银行', '广发银行', '平安银行', '招商银行',
-    '浦发银行', '兴业银行', '浙商银行', '渤海银行', '恒丰银行'];
+    '浦发银行', '兴业银行', '浙商银行', '渤海银行', '恒丰银行', '民生银行'
+  ];
+
+  // 天津银行属于城商行，不是大行
+  if (bankName.includes('天津银行')) return 'AAA';
 
   for (const bank of bigBanks) {
     if (bankName.includes(bank)) return 'BIG';
   }
+
+  // 根据评级返回对应的 category
+  if (rating === 'AA+') return 'AA+';
+  if (rating === 'AA-') return 'AA-';
   return 'AAA';
 }
 
 function findRating(text: string): string {
   // 按顺序匹配：先匹配更具体的（带 +/- 的），再匹配一般的
   // 这样可以避免 "AA+" 被误匹配为 "AA" 或 "AAA"
-  const priorityOrder = ['AA+', 'AA-', 'AAA', 'AA', 'A+', 'A'];
+  const priorityOrder = ['AA+', 'AAA', 'AA', 'A+', 'A'];
 
   for (const rating of priorityOrder) {
     const keywords = RATING_KEYWORDS[rating];
@@ -319,7 +348,7 @@ export function parseQuotation(text: string, defaultWeekday: string = '周一'):
   const weekday = findWeekday(text) || defaultWeekday;
 
   // 如果找不到银行名但有期限和利率，也允许通过（自定义银行）
-  const category = getCategory(bankName || '');
+  const category = getCategory(bankName || '', rating);
 
   // 不再强制要求期限和收益率必须有值，改为返回空字符串让用户手动编辑
   // if (!tenor || !yieldRate) return null;
@@ -434,7 +463,7 @@ export function parseQuotations(text: string, defaultWeekday: string = '周一')
         results.push({
           bankName: bankName || '',
           rating: 'AAA',
-          category: getCategory(bankName || ''),
+          category: getCategory(bankName || '', 'AAA'),
           tenor: q.tenor,
           yieldRate: q.yieldRate,
           volume: '',
@@ -448,7 +477,7 @@ export function parseQuotations(text: string, defaultWeekday: string = '周一')
         results.push({
           ...parsed,
           bankName: bankName || parsed.bankName,
-          category: getCategory(bankName || parsed.bankName)
+          category: getCategory(bankName || parsed.bankName, parsed.rating)
         });
       }
     }
@@ -472,7 +501,7 @@ function tryParsePartial(text: string, defaultWeekday: string) {
   return {
     bankName: bankName || '',
     rating: rating || 'AAA',
-    category: getCategory(bankName || ''),
+    category: getCategory(bankName || '', 'AAA'),
     tenor: tenor || '',
     yieldRate: yieldRate || '',
     volume: volume || '',
