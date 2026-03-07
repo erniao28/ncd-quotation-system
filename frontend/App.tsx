@@ -61,6 +61,14 @@ const App: React.FC = () => {
   // 解析报价面板折叠状态
   const [isQuotePanelCollapsed, setIsQuotePanelCollapsed] = useState(false);
 
+  // 看板视图扩展状态（手动切换）
+  const [isVisualCardExpanded, setIsVisualCardExpanded] = useState(false);
+
+  // 切换看板视图扩展状态
+  const toggleVisualCardExpand = () => {
+    setIsVisualCardExpanded(prev => !prev);
+  };
+
   // 拖动多选功能
   const [isDragging, setIsDragging] = useState(false);
   const [dragMode, setDragMode] = useState<'select' | 'deselect'>('select');
@@ -840,8 +848,8 @@ const App: React.FC = () => {
       const start = Math.min(dragStartIndex, index);
       const end = Math.max(dragStartIndex, index);
 
-      // 获取当前可见的所有 ID
-      const visibleIds = sortedListQuotes.slice(start, end + 1).map(q => q.id);
+      // 使用 filteredQuotes 来获取当前可见的所有 ID
+      const visibleIds = filteredQuotes.slice(start, end + 1).map(q => q.id);
 
       for (const cid of visibleIds) {
         if (dragMode === 'select') {
@@ -1257,7 +1265,12 @@ const App: React.FC = () => {
             </div>
 
             {activeTab === 'VISUAL' && (
-              <VisualCard groupedQuotes={groupedQuotes} onEditMaturity={handleUpdateMaturity} expanded={isMaturityPanelCollapsed && isQuotePanelCollapsed} />
+              <VisualCard
+                groupedQuotes={groupedQuotes}
+                onEditMaturity={handleUpdateMaturity}
+                expanded={isMaturityPanelCollapsed && isQuotePanelCollapsed || isVisualCardExpanded}
+                onToggleExpand={toggleVisualCardExpand}
+              />
             )}
 
             {activeTab === 'TEXT' && (
@@ -1280,7 +1293,7 @@ const App: React.FC = () => {
                       </div>
                       <div className="space-y-1">
                         {group.items.map((item, itemIdx) => {
-                          // 计算在 filteredQuotes 中的全局索引
+                          // 计算在 filteredQuotes 中的索引
                           const globalIndex = filteredQuotes.findIndex(q => q.id === item.id);
                           const isSelected = selectedQuotes.has(item.id);
                           // 双击编辑模式 - 只有在 editingId 匹配时才可编辑
@@ -1328,6 +1341,17 @@ const App: React.FC = () => {
                               }}
                               onClick={(e) => {
                                 e.stopPropagation();
+                              }}
+                              onMouseDown={(e) => {
+                                e.stopPropagation();
+                                handleDragStart(item.id, isSelected, globalIndex);
+                              }}
+                              onMouseEnter={(e) => {
+                                handleDragEnter(item.id, globalIndex);
+                              }}
+                              onMouseUp={(e) => {
+                                e.stopPropagation();
+                                handleDragEnd(item.id);
                               }}
                               className="w-3.5 h-3.5 text-indigo-600 rounded shrink-0 cursor-pointer"
                               title="点击选中，或拖曳批量选择"

@@ -6,9 +6,10 @@ interface VisualCardProps {
   groupedQuotes: GroupedQuotation[];
   onEditMaturity?: (tenor: string, date: string, weekday: string) => void;
   expanded?: boolean; // 是否在扩展模式（面板折叠时）
+  onToggleExpand?: () => void; // 点击切换扩展状态
 }
 
-export const VisualCard: React.FC<VisualCardProps> = ({ groupedQuotes, onEditMaturity, expanded = false }) => {
+export const VisualCard: React.FC<VisualCardProps> = ({ groupedQuotes, onEditMaturity, expanded = false, onToggleExpand }) => {
   const [editingTenor, setEditingTenor] = useState<string | null>(null);
   const [editDate, setEditDate] = useState('');
   const [editWeekday, setEditWeekday] = useState('');
@@ -54,7 +55,8 @@ export const VisualCard: React.FC<VisualCardProps> = ({ groupedQuotes, onEditMat
   );
 
   return (
-    <div id="capture-area" className={`bg-white p-0.5 border-2 border-slate-900 font-sans shadow-xl mx-auto w-full transition-all duration-300 ${expanded ? 'max-w-[1100px] scale-110' : 'max-w-[850px]'}`}>
+    <div id="capture-area" className={`bg-white p-0.5 border-2 border-slate-900 font-sans shadow-xl mx-auto w-full transition-all duration-300 cursor-pointer ${expanded ? 'max-w-[1100px] scale-110' : 'max-w-[850px]'}`}
+      onClick={onToggleExpand}>
       <div className="bg-slate-900 p-2 flex justify-between items-end">
         <div>
           <h1 className="text-base font-black text-white tracking-tighter uppercase">NCD 一级市场最新报价看板</h1>
