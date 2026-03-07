@@ -61,13 +61,21 @@ const App: React.FC = () => {
   // 解析报价面板折叠状态
   const [isQuotePanelCollapsed, setIsQuotePanelCollapsed] = useState(false);
 
-  // 看板视图扩展状态（手动切换）
-  const [isVisualCardExpanded, setIsVisualCardExpanded] = useState(false);
+  // 看板视图手动扩展状态（null=未手动操作，true=手动扩展，false=手动收缩）
+  const [isVisualCardManuallyExpanded, setIsVisualCardManuallyExpanded] = useState<boolean | null>(null);
 
   // 切换看板视图扩展状态
   const toggleVisualCardExpand = () => {
-    setIsVisualCardExpanded(prev => !prev);
+    const panelsCollapsed = isMaturityPanelCollapsed && isQuotePanelCollapsed;
+    const currentExpanded = panelsCollapsed || (isVisualCardManuallyExpanded ?? false);
+    // 手动切换：如果当前是扩展的，就收缩；否则扩展
+    setIsVisualCardManuallyExpanded(!currentExpanded);
   };
+
+  // 计算看板实际扩展状态
+  const isVisualCardExpanded = isVisualCardManuallyExpanded !== null
+    ? isVisualCardManuallyExpanded  // 有手动设置时用手动值
+    : (isMaturityPanelCollapsed && isQuotePanelCollapsed);  // 否则用面板状态
 
   // 拖动多选功能
   const [isDragging, setIsDragging] = useState(false);
@@ -924,14 +932,22 @@ const App: React.FC = () => {
             生成图片
           </button>
           <button
-            onClick={() => setIsMaturityPanelCollapsed(!isMaturityPanelCollapsed)}
+            onClick={() => {
+              setIsMaturityPanelCollapsed(!isMaturityPanelCollapsed);
+              // 当面板从折叠变为展开时，清除手动扩展状态
+              if (!isMaturityPanelCollapsed) setIsVisualCardManuallyExpanded(null);
+            }}
             className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${isMaturityPanelCollapsed ? 'bg-orange-500 text-white hover:bg-orange-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
             title={isMaturityPanelCollapsed ? '展开同步到期日' : '折叠同步到期日'}
           >
             {isMaturityPanelCollapsed ? '▶ 到期日' : '▼ 到期日'}
           </button>
           <button
-            onClick={() => setIsQuotePanelCollapsed(!isQuotePanelCollapsed)}
+            onClick={() => {
+              setIsQuotePanelCollapsed(!isQuotePanelCollapsed);
+              // 当面板从折叠变为展开时，清除手动扩展状态
+              if (!isQuotePanelCollapsed) setIsVisualCardManuallyExpanded(null);
+            }}
             className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${isQuotePanelCollapsed ? 'bg-indigo-500 text-white hover:bg-indigo-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
             title={isQuotePanelCollapsed ? '展开解析报价' : '折叠解析报价'}
           >
@@ -1268,7 +1284,7 @@ const App: React.FC = () => {
               <VisualCard
                 groupedQuotes={groupedQuotes}
                 onEditMaturity={handleUpdateMaturity}
-                expanded={isMaturityPanelCollapsed && isQuotePanelCollapsed || isVisualCardExpanded}
+                expanded={isVisualCardExpanded}
                 onToggleExpand={toggleVisualCardExpand}
               />
             )}
