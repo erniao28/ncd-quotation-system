@@ -21,7 +21,7 @@ import {
 } from './services/api';
 import html2canvas from 'html2canvas';
 
-const APP_VERSION = '20260305'; // 版本号：YYYYMMDD 格式
+const APP_VERSION = '20260307'; // 版本号：YYYYMMDD 格式
 
 const App: React.FC = () => {
   const [inputText, setInputText] = useState('');
