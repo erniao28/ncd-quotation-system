@@ -24,6 +24,11 @@ npm run dev
 
 ### 生产部署
 
+**⚠️ Nginx 配置警告**：
+- 本项目使用独立的 Nginx 配置文件 `/etc/nginx/sites-available/ncd-quotation`
+- 请勿修改此配置，如需配置其他项目，请创建新的独立配置文件
+- WebSocket 代理配置 (`/socket.io`) 是多人协作功能的必要条件，不可删除
+
 ```bash
 # 1. 拉取代码
 git pull origin master
@@ -40,6 +45,33 @@ cp -r dist/* /var/www/html/
 nginx -s reload
 cd ../backend
 pm2 restart ncd-backend  # 或 npm start
+```
+
+**Nginx 配置（仅参考，勿随意修改）**：
+```nginx
+# /etc/nginx/sites-available/ncd-quotation
+server {
+    listen 80;
+    server_name 121.40.35.46;
+
+    location / {
+        proxy_pass http://localhost:5173;  # Vite 前端
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+    location /api {
+        proxy_pass http://localhost:3000;  # 后端 API
+    }
+
+    location /socket.io {
+        proxy_pass http://localhost:3000;  # WebSocket
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
 ```
 
 ---
