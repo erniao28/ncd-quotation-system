@@ -922,6 +922,50 @@ const App: React.FC = () => {
     setIsDragging(false);
     setDragStartId(null);
     setDragStartVisibleIds([]);
+    // 拖曳结束后自动复制选中的内容
+    setTimeout(() => {
+      if (activeTab === 'TEXT') {
+        // 文字版：使用分期限格式复制
+        const selectedItems = allQuotes.filter(q => selectedQuotes.has(q.id));
+        if (selectedItems.length > 0) {
+          // 按期限分组复制
+          const byTenor: Record<string, typeof selectedItems> = {};
+          for (const item of selectedItems) {
+            const tenorKey = item.tenor;
+            if (!byTenor[tenorKey]) byTenor[tenorKey] = [];
+            byTenor[tenorKey].push(item);
+          }
+          let text = '';
+          const tenorOrder = ['1M', '3M', '6M', '9M', '1Y'];
+          for (const tenor of tenorOrder) {
+            if (byTenor[tenor] && byTenor[tenor].length > 0) {
+              text += `(${tenor} 到期日 ${byTenor[tenor][0].maturityDate} ${byTenor[tenor][0].maturityWeekday})\n`;
+              for (const item of byTenor[tenor]) {
+                const vol = item.volume ? ` ${item.volume}` : '';
+                const remarks = item.remarks ? ` ${item.remarks}` : '';
+                text += `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}${vol}${remarks}\n`;
+              }
+            }
+          }
+          copyToClipboard(text.trim());
+          setCopySuccessMsg(`已复制 ${selectedItems.length} 条报价`);
+          setTimeout(() => setCopySuccessMsg(''), 1500);
+        }
+      } else if (activeTab === 'LIST') {
+        // 单条更新：使用纯文本格式复制
+        const selectedItems = allQuotes.filter(q => selectedQuotes.has(q.id));
+        if (selectedItems.length > 0) {
+          const text = selectedItems.map(i => {
+            const vol = i.volume ? ` ${i.volume}` : '';
+            const remarks = i.remarks ? ` ${i.remarks}` : '';
+            return `${i.bankName} ${i.rating} ${i.weekday} ${i.tenor} ${i.yieldRate}${vol}${remarks}`.trim();
+          }).join('\n');
+          copyToClipboard(text);
+          setCopySuccessMsg(`已复制 ${selectedItems.length} 条报价`);
+          setTimeout(() => setCopySuccessMsg(''), 1500);
+        }
+      }
+    }, 0);
   };
 
   // 全局鼠标抬起事件，结束拖动
@@ -1373,12 +1417,44 @@ const App: React.FC = () => {
                             onClick={(e) => {
                               // 点击行任意位置：切换选中 + 复制（Ctrl+ 点击累加选中）
                               e.stopPropagation();
-                              toggleSelect(item.id, undefined, e.ctrlKey);
-                              // 复制该行
-                              const text = `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}${item.volume ? ' ' + item.volume : ''}${item.remarks ? ' ' + item.remarks : ''}`.trim();
-                              copyToClipboard(text);
-                              setCopySuccessMsg('已复制');
-                              setTimeout(() => setCopySuccessMsg(''), 1500);
+                              const isCtrl = e.ctrlKey;
+                              toggleSelect(item.id, undefined, isCtrl);
+                              // 复制逻辑：Ctrl+ 点击复制所有选中的项，单击只复制当前行
+                              setTimeout(() => {
+                                if (isCtrl) {
+                                  // Ctrl+ 点击：复制所有选中的项（分期限格式）
+                                  const selectedItems = allQuotes.filter(q => selectedQuotes.has(q.id));
+                                  if (selectedItems.length > 0) {
+                                    const byTenor: Record<string, typeof selectedItems> = {};
+                                    for (const selItem of selectedItems) {
+                                      const tenorKey = selItem.tenor;
+                                      if (!byTenor[tenorKey]) byTenor[tenorKey] = [];
+                                      byTenor[tenorKey].push(selItem);
+                                    }
+                                    let text = '';
+                                    const tenorOrder = ['1M', '3M', '6M', '9M', '1Y'];
+                                    for (const tenor of tenorOrder) {
+                                      if (byTenor[tenor] && byTenor[tenor].length > 0) {
+                                        text += `(${tenor} 到期日 ${byTenor[tenor][0].maturityDate} ${byTenor[tenor][0].maturityWeekday})\n`;
+                                        for (const selItem of byTenor[tenor]) {
+                                          const vol = selItem.volume ? ` ${selItem.volume}` : '';
+                                          const remarks = selItem.remarks ? ` ${selItem.remarks}` : '';
+                                          text += `${selItem.bankName} ${selItem.rating} ${selItem.weekday} ${selItem.tenor} ${selItem.yieldRate}${vol}${remarks}\n`;
+                                        }
+                                      }
+                                    }
+                                    copyToClipboard(text.trim());
+                                    setCopySuccessMsg(`已复制 ${selectedItems.length} 条报价`);
+                                    setTimeout(() => setCopySuccessMsg(''), 1500);
+                                  }
+                                } else {
+                                  // 单击：只复制当前行
+                                  const text = `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}${item.volume ? ' ' + item.volume : ''}${item.remarks ? ' ' + item.remarks : ''}`.trim();
+                                  copyToClipboard(text);
+                                  setCopySuccessMsg('已复制');
+                                  setTimeout(() => setCopySuccessMsg(''), 1500);
+                                }
+                              }, 0);
                             }}
                             onMouseDown={(e) => {
                               // 按下鼠标开始拖曳（Ctrl+ 拖曳累加选中）
@@ -1400,12 +1476,47 @@ const App: React.FC = () => {
                               checked={isSelected}
                               onChange={(e) => {
                                 e.stopPropagation();
-                                toggleSelect(item.id, e.target.checked, e.ctrlKey);
-                                // 复制该行
-                                const text = `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}${item.volume ? ' ' + item.volume : ''}${item.remarks ? ' ' + item.remarks : ''}`.trim();
-                                copyToClipboard(text);
-                                setCopySuccessMsg('已复制');
-                                setTimeout(() => setCopySuccessMsg(''), 1500);
+                                const isCtrl = e.ctrlKey;
+                                // 拖曳过程中不调用 toggleSelect，避免清空选中
+                                if (!isDragging) {
+                                  toggleSelect(item.id, e.target.checked, isCtrl);
+                                }
+                                // 复制逻辑：Ctrl+ 单击复制所有选中的项，单击只复制当前行
+                                setTimeout(() => {
+                                  if (isCtrl) {
+                                    // Ctrl+ 单击：复制所有选中的项（分期限格式）
+                                    const selectedItems = allQuotes.filter(q => selectedQuotes.has(q.id));
+                                    if (selectedItems.length > 0) {
+                                      const byTenor: Record<string, typeof selectedItems> = {};
+                                      for (const selItem of selectedItems) {
+                                        const tenorKey = selItem.tenor;
+                                        if (!byTenor[tenorKey]) byTenor[tenorKey] = [];
+                                        byTenor[tenorKey].push(selItem);
+                                      }
+                                      let text = '';
+                                      const tenorOrder = ['1M', '3M', '6M', '9M', '1Y'];
+                                      for (const tenor of tenorOrder) {
+                                        if (byTenor[tenor] && byTenor[tenor].length > 0) {
+                                          text += `(${tenor} 到期日 ${byTenor[tenor][0].maturityDate} ${byTenor[tenor][0].maturityWeekday})\n`;
+                                          for (const selItem of byTenor[tenor]) {
+                                            const vol = selItem.volume ? ` ${selItem.volume}` : '';
+                                            const remarks = selItem.remarks ? ` ${selItem.remarks}` : '';
+                                            text += `${selItem.bankName} ${selItem.rating} ${selItem.weekday} ${selItem.tenor} ${selItem.yieldRate}${vol}${remarks}\n`;
+                                          }
+                                        }
+                                      }
+                                      copyToClipboard(text.trim());
+                                      setCopySuccessMsg(`已复制 ${selectedItems.length} 条报价`);
+                                      setTimeout(() => setCopySuccessMsg(''), 1500);
+                                    }
+                                  } else {
+                                    // 单击：只复制当前行
+                                    const text = `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}${item.volume ? ' ' + item.volume : ''}${item.remarks ? ' ' + item.remarks : ''}`.trim();
+                                    copyToClipboard(text);
+                                    setCopySuccessMsg('已复制');
+                                    setTimeout(() => setCopySuccessMsg(''), 1500);
+                                  }
+                                }, 0);
                               }}
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -1628,12 +1739,31 @@ const App: React.FC = () => {
                         onClick={(e) => {
                           // 点击行任意位置：切换选中 + 复制（Ctrl+ 点击累加选中）
                           e.stopPropagation();
-                          toggleSelect(item.id, undefined, e.ctrlKey);
-                          // 复制该行
-                          const text = `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}${item.volume ? ' ' + item.volume : ''}${item.remarks ? ' ' + item.remarks : ''}`.trim();
-                          copyToClipboard(text);
-                          setCopySuccessMsg('已复制');
-                          setTimeout(() => setCopySuccessMsg(''), 1500);
+                          const isCtrl = e.ctrlKey;
+                          toggleSelect(item.id, undefined, isCtrl);
+                          // 复制逻辑：Ctrl+ 点击复制所有选中的项，单击只复制当前行
+                          setTimeout(() => {
+                            if (isCtrl) {
+                              // Ctrl+ 点击：复制所有选中的项（纯文本格式）
+                              const selectedItems = allQuotes.filter(q => selectedQuotes.has(q.id));
+                              if (selectedItems.length > 0) {
+                                const text = selectedItems.map(i => {
+                                  const vol = i.volume ? ` ${i.volume}` : '';
+                                  const remarks = i.remarks ? ` ${i.remarks}` : '';
+                                  return `${i.bankName} ${i.rating} ${i.weekday} ${i.tenor} ${i.yieldRate}${vol}${remarks}`.trim();
+                                }).join('\n');
+                                copyToClipboard(text);
+                                setCopySuccessMsg(`已复制 ${selectedItems.length} 条报价`);
+                                setTimeout(() => setCopySuccessMsg(''), 1500);
+                              }
+                            } else {
+                              // 单击：只复制当前行
+                              const text = `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}${item.volume ? ' ' + item.volume : ''}${item.remarks ? ' ' + item.remarks : ''}`.trim();
+                              copyToClipboard(text);
+                              setCopySuccessMsg('已复制');
+                              setTimeout(() => setCopySuccessMsg(''), 1500);
+                            }
+                          }, 0);
                         }}
                         onDoubleClick={(e) => {
                           // 双击进入编辑模式
@@ -1666,12 +1796,34 @@ const App: React.FC = () => {
                           checked={isSelected}
                           onChange={(e) => {
                             e.stopPropagation();
-                            toggleSelect(item.id, e.target.checked, e.ctrlKey);
-                            // 复制该行
-                            const text = `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}${item.volume ? ' ' + item.volume : ''}${item.remarks ? ' ' + item.remarks : ''}`.trim();
-                            copyToClipboard(text);
-                            setCopySuccessMsg('已复制');
-                            setTimeout(() => setCopySuccessMsg(''), 1500);
+                            const isCtrl = e.ctrlKey;
+                            // 拖曳过程中不调用 toggleSelect，避免清空选中
+                            if (!isDragging) {
+                              toggleSelect(item.id, e.target.checked, isCtrl);
+                            }
+                            // 复制逻辑：Ctrl+ 单击复制所有选中的项，单击只复制当前行
+                            setTimeout(() => {
+                              if (isCtrl) {
+                                // Ctrl+ 单击：复制所有选中的项（纯文本格式）
+                                const selectedItems = allQuotes.filter(q => selectedQuotes.has(q.id));
+                                if (selectedItems.length > 0) {
+                                  const text = selectedItems.map(i => {
+                                    const vol = i.volume ? ` ${i.volume}` : '';
+                                    const remarks = i.remarks ? ` ${i.remarks}` : '';
+                                    return `${i.bankName} ${i.rating} ${i.weekday} ${i.tenor} ${i.yieldRate}${vol}${remarks}`.trim();
+                                  }).join('\n');
+                                  copyToClipboard(text);
+                                  setCopySuccessMsg(`已复制 ${selectedItems.length} 条报价`);
+                                  setTimeout(() => setCopySuccessMsg(''), 1500);
+                                }
+                              } else {
+                                // 单击：只复制当前行
+                                const text = `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}${item.volume ? ' ' + item.volume : ''}${item.remarks ? ' ' + item.remarks : ''}`.trim();
+                                copyToClipboard(text);
+                                setCopySuccessMsg('已复制');
+                                setTimeout(() => setCopySuccessMsg(''), 1500);
+                              }
+                            }, 0);
                           }}
                           onClick={(e) => {
                             e.stopPropagation();
