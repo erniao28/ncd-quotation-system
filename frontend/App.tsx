@@ -620,9 +620,8 @@ const App: React.FC = () => {
 
   // 复制选中报价的函数（不带到期日）
   const handleCopySelected = () => {
-    const selectedItems = groupedQuotes.flatMap(g =>
-      g.items.filter(i => selectedQuotes.has(i.id))
-    );
+    // 直接从 allQuotes 中获取选中的项，确保所有视图的数据一致
+    const selectedItems = allQuotes.filter(q => selectedQuotes.has(q.id));
     if (selectedItems.length === 0) {
       setCopySuccessMsg('请先选择要复制的报价');
       setTimeout(() => setCopySuccessMsg(''), 2000);
@@ -640,9 +639,8 @@ const App: React.FC = () => {
 
   // 复制选中报价的函数（带到期日，同复制全部格式）
   const handleCopySelectedWithTenor = () => {
-    const selectedItems = groupedQuotes.flatMap(g =>
-      g.items.filter(i => selectedQuotes.has(i.id))
-    );
+    // 直接从 allQuotes 中获取选中的项，确保所有视图的数据一致
+    const selectedItems = allQuotes.filter(q => selectedQuotes.has(q.id));
     if (selectedItems.length === 0) {
       setCopySuccessMsg('请先选择要复制的报价');
       setTimeout(() => setCopySuccessMsg(''), 2000);
