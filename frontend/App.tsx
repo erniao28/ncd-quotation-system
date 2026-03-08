@@ -820,16 +820,25 @@ const App: React.FC = () => {
     }
   };
 
-  const toggleSelect = (id: string, isChecked?: boolean) => {
+  // 选中/取消选中（需要 Ctrl 键才能累加选中，否则只选中当前项）
+  const toggleSelect = (id: string, isChecked?: boolean, useCtrl = false) => {
     setSelectedQuotes(prev => {
       const newSet = new Set(prev);
-      // 如果传入了 isChecked 参数，直接使用；否则切换状态
       const targetState = isChecked !== undefined ? isChecked : !newSet.has(id);
 
-      if (targetState) {
-        newSet.add(id);
+      if (useCtrl) {
+        // Ctrl 模式：累加选中
+        if (targetState) {
+          newSet.add(id);
+        } else {
+          newSet.delete(id);
+        }
       } else {
-        newSet.delete(id);
+        // 默认模式：只选中当前项（清空之前的选中）
+        newSet.clear();
+        if (targetState) {
+          newSet.add(id);
+        }
       }
       return newSet;
     });
@@ -839,13 +848,49 @@ const App: React.FC = () => {
   const [dragStartId, setDragStartId] = useState<string | null>(null);
   // 记录拖动开始时的所有可见 ID 列表（用于处理排序后的拖曳）
   const [dragStartVisibleIds, setDragStartVisibleIds] = useState<string[]>([]);
+  // 记录拖动开始时是否按住了 Ctrl
+  const [dragStartWithCtrl, setDragStartWithCtrl] = useState<boolean>(false);
+  // 记录当前是否按住 Ctrl 键
+  const [isCtrlPressed, setIsCtrlPressed] = useState(false);
+
+  // 监听 Ctrl 键
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Control' || e.ctrlKey) setIsCtrlPressed(true);
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Control' || e.ctrlKey) setIsCtrlPressed(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, []);
 
   // 拖动选择开始
-  const handleDragStart = (id: string, isChecked: boolean, visibleIds: string[]) => {
+  const handleDragStart = (id: string, isChecked: boolean, visibleIds: string[], isCtrlPressed = false) => {
     setDragStartId(id);
     setDragStartVisibleIds(visibleIds);
+    setDragStartWithCtrl(isCtrlPressed);
     setIsDragging(true);
     setDragMode(isChecked ? 'deselect' : 'select');
+
+    // 如果不是 Ctrl 模式，先清空选中
+    if (!isCtrlPressed) {
+      setSelectedQuotes(new Set());
+    }
+    // 选中起始项
+    setSelectedQuotes(prev => {
+      const newSet = new Set(prev);
+      if (isChecked) {
+        newSet.add(id);
+      } else {
+        newSet.delete(id);
+      }
+      return newSet;
+    });
   };
 
   // 拖动经过 - 基于 ID 列表范围选择
@@ -892,11 +937,11 @@ const App: React.FC = () => {
   }, []);
 
   const selectAll = () => {
-    if (selectedQuotes.size === filteredQuotes.length) {
-      setSelectedQuotes(new Set());
-    } else {
-      setSelectedQuotes(new Set(filteredQuotes.map(q => q.id)));
-    }
+    setSelectedQuotes(new Set(filteredQuotes.map(q => q.id)));
+  };
+
+  const cancelSelectAll = () => {
+    setSelectedQuotes(new Set());
   };
 
   return (
@@ -1298,9 +1343,14 @@ const App: React.FC = () => {
                 <div className="flex justify-between items-center mb-6 shrink-0">
                   <div className="flex items-center gap-4">
                     <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">文字版 (自动保存)</h3>
-                    <button onClick={selectAll} className="text-[10px] font-bold text-indigo-400 hover:text-indigo-600">
-                      {selectedQuotes.size === filteredQuotes.length ? '取消全选' : '全选'}
-                    </button>
+                    <div className="flex gap-2">
+                      <button onClick={selectAll} className="text-[10px] font-bold text-indigo-400 hover:text-indigo-600">
+                        全选
+                      </button>
+                      <button onClick={cancelSelectAll} className="text-[10px] font-bold text-slate-400 hover:text-slate-600">
+                        取消全选
+                      </button>
+                    </div>
                   </div>
                   <button onClick={async () => {if(confirm('清空所有？')) {await deleteAllQuotations(); setAllQuotes([]);}}} className="text-[10px] font-bold text-red-400 hover:text-red-600 uppercase">Clear All</button>
                 </div>
@@ -1323,9 +1373,9 @@ const App: React.FC = () => {
                             isSelected ? 'bg-indigo-100 border border-indigo-300' : 'hover:bg-white'
                           }`}
                             onClick={(e) => {
-                              // 点击行任意位置：切换选中 + 复制
+                              // 点击行任意位置：切换选中 + 复制（Ctrl+ 点击累加选中）
                               e.stopPropagation();
-                              toggleSelect(item.id);
+                              toggleSelect(item.id, undefined, e.ctrlKey);
                               // 复制该行
                               const text = `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}${item.volume ? ' ' + item.volume : ''}${item.remarks ? ' ' + item.remarks : ''}`.trim();
                               copyToClipboard(text);
@@ -1333,10 +1383,10 @@ const App: React.FC = () => {
                               setTimeout(() => setCopySuccessMsg(''), 1500);
                             }}
                             onMouseDown={(e) => {
-                              // 按下鼠标开始拖曳
+                              // 按下鼠标开始拖曳（Ctrl+ 拖曳累加选中）
                               e.preventDefault();
                               e.stopPropagation();
-                              handleDragStart(item.id, isSelected, groupIds);
+                              handleDragStart(item.id, isSelected, groupIds, e.ctrlKey);
                             }}
                             onMouseEnter={() => {
                               handleDragEnter(item.id);
@@ -1352,7 +1402,7 @@ const App: React.FC = () => {
                               checked={isSelected}
                               onChange={(e) => {
                                 e.stopPropagation();
-                                toggleSelect(item.id, e.target.checked);
+                                toggleSelect(item.id, e.target.checked, e.ctrlKey);
                                 // 复制该行
                                 const text = `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}${item.volume ? ' ' + item.volume : ''}${item.remarks ? ' ' + item.remarks : ''}`.trim();
                                 copyToClipboard(text);
@@ -1364,7 +1414,7 @@ const App: React.FC = () => {
                               }}
                               onMouseDown={(e) => {
                                 e.stopPropagation();
-                                handleDragStart(item.id, isSelected, groupIds);
+                                handleDragStart(item.id, isSelected, groupIds, e.ctrlKey);
                               }}
                               onMouseEnter={(e) => {
                                 handleDragEnter(item.id);
@@ -1534,9 +1584,14 @@ const App: React.FC = () => {
                 <div className="flex justify-between items-center mb-4">
                   <div className="flex items-center gap-4">
                     <h3 className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">单条价格更新 (实时)</h3>
-                    <button onClick={selectAll} className="text-[9px] font-bold text-indigo-400 hover:text-indigo-600">
-                      {selectedQuotes.size === sortedListQuotes.length ? '取消全选' : '全选'}
-                    </button>
+                    <div className="flex gap-2">
+                      <button onClick={selectAll} className="text-[9px] font-bold text-indigo-400 hover:text-indigo-600">
+                        全选
+                      </button>
+                      <button onClick={cancelSelectAll} className="text-[9px] font-bold text-slate-400 hover:text-slate-600">
+                        取消全选
+                      </button>
+                    </div>
                   </div>
                   <div className="flex gap-2">
                     <select
@@ -1573,9 +1628,9 @@ const App: React.FC = () => {
                             : idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'
                         }`}
                         onClick={(e) => {
-                          // 点击行任意位置：切换选中 + 复制
+                          // 点击行任意位置：切换选中 + 复制（Ctrl+ 点击累加选中）
                           e.stopPropagation();
-                          toggleSelect(item.id);
+                          toggleSelect(item.id, undefined, e.ctrlKey);
                           // 复制该行
                           const text = `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}${item.volume ? ' ' + item.volume : ''}${item.remarks ? ' ' + item.remarks : ''}`.trim();
                           copyToClipboard(text);
@@ -1594,10 +1649,10 @@ const App: React.FC = () => {
                           }, 0);
                         }}
                         onMouseDown={(e) => {
-                          // 按下鼠标开始拖曳
+                          // 按下鼠标开始拖曳（Ctrl+ 拖曳累加选中）
                           e.preventDefault();
                           e.stopPropagation();
-                          handleDragStart(item.id, isSelected, visibleIds);
+                          handleDragStart(item.id, isSelected, visibleIds, e.ctrlKey);
                         }}
                         onMouseEnter={() => {
                           handleDragEnter(item.id);
@@ -1613,7 +1668,7 @@ const App: React.FC = () => {
                           checked={isSelected}
                           onChange={(e) => {
                             e.stopPropagation();
-                            toggleSelect(item.id, e.target.checked);
+                            toggleSelect(item.id, e.target.checked, e.ctrlKey);
                             // 复制该行
                             const text = `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}${item.volume ? ' ' + item.volume : ''}${item.remarks ? ' ' + item.remarks : ''}`.trim();
                             copyToClipboard(text);
@@ -1625,7 +1680,7 @@ const App: React.FC = () => {
                           }}
                           onMouseDown={(e) => {
                             e.stopPropagation();
-                            handleDragStart(item.id, isSelected, visibleIds);
+                            handleDragStart(item.id, isSelected, visibleIds, e.ctrlKey);
                           }}
                           onMouseEnter={(e) => {
                             handleDragEnter(item.id);
@@ -1635,7 +1690,7 @@ const App: React.FC = () => {
                             handleDragEnd();
                           }}
                           className={`w-3.5 h-3.5 text-indigo-600 rounded cursor-pointer shrink-0 ${isDragging ? 'select-none' : ''}`}
-                          title="点击选中，或拖曳批量选择"
+                          title="点击选中，或拖曳批量选择 (Ctrl+ 点击累加)"
                         />
                         <span className="text-[8px] text-slate-400 font-mono w-14 shrink-0">{new Date(item.updatedAt || item.createdAt || Date.now()).toLocaleTimeString('zh-CN', {hour12:false, hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>
                         <input
