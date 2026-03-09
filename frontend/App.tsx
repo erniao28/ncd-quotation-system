@@ -1484,7 +1484,12 @@ const App: React.FC = () => {
                                 const isCtrl = e.ctrlKey;
                                 // 拖曳过程中不调用 toggleSelect，避免清空选中
                                 if (!isDragging) {
-                                  toggleSelect(item.id, e.target.checked, isCtrl);
+                                  // Ctrl 键：累加选中/取消；非 Ctrl 键：只选中当前项
+                                  if (isCtrl) {
+                                    toggleSelect(item.id, e.target.checked, true);
+                                  } else {
+                                    toggleSelect(item.id, e.target.checked, false);
+                                  }
                                 }
                                 // 任何选中状态变化后都自动复制所有选中的项
                                 setTimeout(() => {
@@ -1511,7 +1516,6 @@ const App: React.FC = () => {
                             <input
                               className="w-20 font-bold bg-transparent border-none focus:bg-white outline-none p-0 text-slate-900 text-[10px] shrink-0"
                               value={item.bankName}
-                              readOnly={!isEditable}
                               onDoubleClick={(e) => {
                                 e.stopPropagation();
                                 setEditingId(item.id);
@@ -1550,12 +1554,11 @@ const App: React.FC = () => {
                               <option value="AA+">AA+</option>
                               <option value="AA-">AA-</option>
                             </select>
-                            <input className="w-5 text-slate-400 text-[8px] bg-transparent shrink-0" value={item.weekday} readOnly={!isEditable} onDoubleClick={(e) => { e.stopPropagation(); setEditingId(item.id); (e.target as HTMLInputElement).focus(); }} onBlur={() => setEditingId(null)} onChange={e => handleUpdateQuote(item.id, 'weekday', e.target.value)} />
+                            <input className="w-5 text-slate-400 text-[8px] bg-transparent shrink-0" value={item.weekday} onDoubleClick={(e) => { e.stopPropagation(); setEditingId(item.id); (e.target as HTMLInputElement).focus(); }} onBlur={() => setEditingId(null)} onChange={e => handleUpdateQuote(item.id, 'weekday', e.target.value)} />
                             <input
                               className={`w-14 font-bold text-right outline-none bg-transparent text-[10px] shrink-0 ${item.yieldRate.includes('↑') ? 'text-red-600' : item.yieldRate.includes('↓') ? 'text-emerald-600' : 'text-blue-600'}`}
-                              value={isEditable ? editingYieldRate : item.yieldRate.replace(/%|↑|↓/g, '')}
+                              value={editingId === item.id ? editingYieldRate : item.yieldRate.replace(/%|↑|↓/g, '')}
                               placeholder="收益率"
-                              readOnly={!isEditable}
                               onDoubleClick={(e) => {
                                 e.stopPropagation();
                                 setEditingId(item.id);
@@ -1601,7 +1604,6 @@ const App: React.FC = () => {
                               className="w-14 text-slate-400 text-[8px] text-center bg-transparent shrink-0"
                               value={item.volume ? item.volume.replace(/亿 | 元/g, '') : ''}
                               placeholder="量"
-                              readOnly={!isEditable}
                               onDoubleClick={(e) => { e.stopPropagation(); setEditingId(item.id); (e.target as HTMLInputElement).focus(); }}
                               onBlur={() => setEditingId(null)}
                               onKeyDown={(e) => {
@@ -1624,7 +1626,6 @@ const App: React.FC = () => {
                               className="w-20 text-slate-400 italic text-[8px] truncate bg-transparent shrink-0"
                               value={item.remarks || ''}
                               placeholder="备注"
-                              readOnly={!isEditable}
                               onDoubleClick={(e) => { e.stopPropagation(); setEditingId(item.id); (e.target as HTMLInputElement).focus(); }}
                               onBlur={() => setEditingId(null)}
                               onKeyDown={(e) => {
@@ -1753,7 +1754,12 @@ const App: React.FC = () => {
                             const isCtrl = e.ctrlKey;
                             // 拖曳过程中不调用 toggleSelect，避免清空选中
                             if (!isDragging) {
-                              toggleSelect(item.id, e.target.checked, isCtrl);
+                              // Ctrl 键：累加选中/取消；非 Ctrl 键：只选中当前项
+                              if (isCtrl) {
+                                toggleSelect(item.id, e.target.checked, true);
+                              } else {
+                                toggleSelect(item.id, e.target.checked, false);
+                              }
                             }
                             // 任何选中状态变化后都自动复制所有选中的项
                             setTimeout(() => {
@@ -1781,7 +1787,6 @@ const App: React.FC = () => {
                         <input
                           className="w-20 font-bold bg-transparent border-none focus:bg-white outline-none p-0 text-slate-900 text-[10px] shrink-0"
                           value={item.bankName}
-                          readOnly={!isEditable}
                           onDoubleClick={(e) => {
                             e.stopPropagation();
                             setEditingId(item.id);
@@ -1794,7 +1799,6 @@ const App: React.FC = () => {
                         <select
                           className="w-10 text-slate-400 text-[9px] bg-transparent outline-none cursor-pointer shrink-0"
                           value={item.rating}
-                          disabled={!isEditable}
                           onBlur={() => setEditingId(null)}
                           onChange={e => {
                             e.stopPropagation();
@@ -1808,7 +1812,6 @@ const App: React.FC = () => {
                         <select
                           className="w-14 text-[8px] px-0.5 py-0.5 rounded font-bold cursor-pointer outline-none bg-white border border-slate-200 shrink-0"
                           value={item.category}
-                          disabled={!isEditable}
                           onBlur={() => setEditingId(null)}
                           onChange={e => {
                             e.stopPropagation();
@@ -1820,13 +1823,12 @@ const App: React.FC = () => {
                           <option value="AA+">AA+</option>
                           <option value="AA-">AA-</option>
                         </select>
-                        <input className="w-5 text-slate-400 text-[8px] bg-transparent shrink-0" value={item.weekday} readOnly={!isEditable} onDoubleClick={(e) => { e.stopPropagation(); setEditingId(item.id); (e.target as HTMLInputElement).focus(); }} onBlur={() => setEditingId(null)} onChange={e => handleUpdateQuote(item.id, 'weekday', e.target.value)} />
-                        <input className="w-10 text-slate-400 text-[8px] bg-transparent shrink-0" value={item.tenor} readOnly={!isEditable} onDoubleClick={(e) => { e.stopPropagation(); setEditingId(item.id); (e.target as HTMLInputElement).focus(); }} onBlur={() => setEditingId(null)} onChange={e => handleUpdateQuote(item.id, 'tenor', e.target.value)} />
+                        <input className="w-5 text-slate-400 text-[8px] bg-transparent shrink-0" value={item.weekday} onDoubleClick={(e) => { e.stopPropagation(); setEditingId(item.id); (e.target as HTMLInputElement).focus(); }} onBlur={() => setEditingId(null)} onChange={e => handleUpdateQuote(item.id, 'weekday', e.target.value)} />
+                        <input className="w-10 text-slate-400 text-[8px] bg-transparent shrink-0" value={item.tenor} onDoubleClick={(e) => { e.stopPropagation(); setEditingId(item.id); (e.target as HTMLInputElement).focus(); }} onBlur={() => setEditingId(null)} onChange={e => handleUpdateQuote(item.id, 'tenor', e.target.value)} />
                         <input
                           className={`w-14 font-bold text-right outline-none bg-transparent text-[10px] shrink-0 ${item.yieldRate.includes('↑') ? 'text-red-600' : item.yieldRate.includes('↓') ? 'text-emerald-600' : 'text-blue-600'}`}
-                          value={isEditable ? editingYieldRate : item.yieldRate.replace(/%|↑|↓/g, '')}
+                          value={editingId === item.id ? editingYieldRate : item.yieldRate.replace(/%|↑|↓/g, '')}
                           placeholder="收益率"
-                          readOnly={!isEditable}
                           onDoubleClick={(e) => {
                             e.stopPropagation();
                             setEditingId(item.id);
@@ -1872,7 +1874,6 @@ const App: React.FC = () => {
                           className="w-14 text-slate-400 text-[8px] text-center bg-transparent shrink-0"
                           value={item.volume ? item.volume.replace(/亿 | 元/g, '') : ''}
                           placeholder="量"
-                          readOnly={!isEditable}
                           onDoubleClick={(e) => { e.stopPropagation(); setEditingId(item.id); (e.target as HTMLInputElement).focus(); }}
                           onBlur={() => setEditingId(null)}
                           onKeyDown={(e) => {
@@ -1895,7 +1896,6 @@ const App: React.FC = () => {
                           className="w-20 text-slate-400 italic text-[8px] truncate bg-transparent shrink-0"
                           value={item.remarks || ''}
                           placeholder="备注"
-                          readOnly={!isEditable}
                           onDoubleClick={(e) => { e.stopPropagation(); setEditingId(item.id); (e.target as HTMLInputElement).focus(); }}
                           onBlur={() => setEditingId(null)}
                           onKeyDown={(e) => {
