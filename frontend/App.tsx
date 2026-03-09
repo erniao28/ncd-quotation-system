@@ -339,7 +339,16 @@ const App: React.FC = () => {
         if (decimalPart && decimalPart.length === 1) {
           formattedRate = rateVal.toFixed(2);
         }
-        // 其他情况保持实际小数位数（2-4 位）
+        // 特殊处理：如果第 3 位是 0，只保留 2 位（如 1.560 → 1.56）
+        // 但如果第 3 位不是 0，保留到第 3 或第 4 位（如 1.565 或 1.5655）
+        if (decimalPart && decimalPart.length >= 3) {
+          const thirdDigit = decimalPart[2];
+          if (thirdDigit === '0') {
+            // 第 3 位是 0，只保留 2 位
+            formattedRate = rateVal.toFixed(2);
+          }
+          // 否则保持当前位数（3-4 位）
+        }
 
         // 先从当前数据中获取原有的收益率和涨跌标记
         const currentQuote = allQuotes.find(q => q.id === id);
@@ -1452,10 +1461,16 @@ const App: React.FC = () => {
                             isSelected ? 'bg-indigo-100 border border-indigo-300' : 'hover:bg-white'
                           }`}
                             onClick={(e) => {
-                              // 点击行任意位置：切换选中 + 复制
+                              // 点击行任意位置：切换选中
                               e.stopPropagation();
                               const isCtrl = e.ctrlKey;
-                              toggleSelect(item.id, undefined, isCtrl);
+                              if (isCtrl) {
+                                // Ctrl 键：累加选中/取消
+                                toggleSelect(item.id, undefined, true);
+                              } else {
+                                // 非 Ctrl 键：只选中当前项
+                                toggleSelect(item.id, undefined, false);
+                              }
                               // 任何选中状态变化后都自动复制所有选中的项
                               setTimeout(() => {
                                 copySelectedQuotes();
@@ -1476,43 +1491,6 @@ const App: React.FC = () => {
                               handleDragEnd();
                             }}
                           >
-                            <input
-                              type="checkbox"
-                              checked={isSelected}
-                              onChange={(e) => {
-                                e.stopPropagation();
-                                const isCtrl = e.ctrlKey;
-                                // 拖曳过程中不调用 toggleSelect，避免清空选中
-                                if (!isDragging) {
-                                  // Ctrl 键：累加选中/取消；非 Ctrl 键：只选中当前项
-                                  if (isCtrl) {
-                                    toggleSelect(item.id, e.target.checked, true);
-                                  } else {
-                                    toggleSelect(item.id, e.target.checked, false);
-                                  }
-                                }
-                                // 任何选中状态变化后都自动复制所有选中的项
-                                setTimeout(() => {
-                                  copySelectedQuotes();
-                                }, 0);
-                              }}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                              }}
-                              onMouseDown={(e) => {
-                                e.stopPropagation();
-                                handleDragStart(item.id, isSelected, groupIds, e.ctrlKey);
-                              }}
-                              onMouseEnter={(e) => {
-                                handleDragEnter(item.id);
-                              }}
-                              onMouseUp={(e) => {
-                                e.stopPropagation();
-                                handleDragEnd();
-                              }}
-                              className="w-3.5 h-3.5 text-indigo-600 rounded shrink-0 cursor-pointer"
-                              title="点击选中，或拖曳批量选择"
-                            />
                             <input
                               className="w-20 font-bold bg-transparent border-none focus:bg-white outline-none p-0 text-slate-900 text-[10px] shrink-0"
                               value={item.bankName}
@@ -1711,10 +1689,16 @@ const App: React.FC = () => {
                             : idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'
                         }`}
                         onClick={(e) => {
-                          // 点击行任意位置：切换选中 + 复制
+                          // 点击行任意位置：切换选中
                           e.stopPropagation();
                           const isCtrl = e.ctrlKey;
-                          toggleSelect(item.id, undefined, isCtrl);
+                          if (isCtrl) {
+                            // Ctrl 键：累加选中/取消
+                            toggleSelect(item.id, undefined, true);
+                          } else {
+                            // 非 Ctrl 键：只选中当前项
+                            toggleSelect(item.id, undefined, false);
+                          }
                           // 任何选中状态变化后都自动复制所有选中的项
                           setTimeout(() => {
                             copySelectedQuotes();
@@ -1746,43 +1730,6 @@ const App: React.FC = () => {
                           handleDragEnd();
                         }}
                       >
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={(e) => {
-                            e.stopPropagation();
-                            const isCtrl = e.ctrlKey;
-                            // 拖曳过程中不调用 toggleSelect，避免清空选中
-                            if (!isDragging) {
-                              // Ctrl 键：累加选中/取消；非 Ctrl 键：只选中当前项
-                              if (isCtrl) {
-                                toggleSelect(item.id, e.target.checked, true);
-                              } else {
-                                toggleSelect(item.id, e.target.checked, false);
-                              }
-                            }
-                            // 任何选中状态变化后都自动复制所有选中的项
-                            setTimeout(() => {
-                              copySelectedQuotes();
-                            }, 0);
-                          }}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                          }}
-                          onMouseDown={(e) => {
-                            e.stopPropagation();
-                            handleDragStart(item.id, isSelected, visibleIds, e.ctrlKey);
-                          }}
-                          onMouseEnter={(e) => {
-                            handleDragEnter(item.id);
-                          }}
-                          onMouseUp={(e) => {
-                            e.stopPropagation();
-                            handleDragEnd();
-                          }}
-                          className={`w-3.5 h-3.5 text-indigo-600 rounded cursor-pointer shrink-0 ${isDragging ? 'select-none' : ''}`}
-                          title="点击选中，或拖曳批量选择 (Ctrl+ 点击累加)"
-                        />
                         <span className="text-[8px] text-slate-400 font-mono w-14 shrink-0">{new Date(item.updatedAt || item.createdAt || Date.now()).toLocaleTimeString('zh-CN', {hour12:false, hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>
                         <input
                           className="w-20 font-bold bg-transparent border-none focus:bg-white outline-none p-0 text-slate-900 text-[10px] shrink-0"
