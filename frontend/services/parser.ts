@@ -284,9 +284,11 @@ function findYieldRate(text: string): string {
         formatted += '.00';
       } else {
         const decimalPart = formatted.split('.')[1];
-        if (decimalPart.length < 2) {
+        if (decimalPart.length === 1) {
+          // 只有小数点后 1 位时才补足 2 位
           formatted = value.toFixed(2);
         }
+        // 其他情况保持实际小数位数（2-4 位）
       }
       return formatted;
     }
