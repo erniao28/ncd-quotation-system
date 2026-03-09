@@ -828,9 +828,10 @@ const App: React.FC = () => {
   };
 
   // 选中/取消选中（需要 Ctrl 键才能累加选中，否则只选中当前项）
-  const toggleSelect = (id: string, isChecked?: boolean, useCtrl = false) => {
+  const toggleSelect = (id: string, isChecked?: boolean, useCtrl = false): Set<string> => {
+    let newSet: Set<string>;
     setSelectedQuotes(prev => {
-      const newSet = new Set(prev);
+      newSet = new Set(prev);
       const targetState = isChecked !== undefined ? isChecked : !newSet.has(id);
 
       if (useCtrl) {
@@ -849,6 +850,7 @@ const App: React.FC = () => {
       }
       return newSet;
     });
+    return newSet!;
   };
 
   // 记录拖动开始的复选框 ID
@@ -961,8 +963,10 @@ const App: React.FC = () => {
   };
 
   // 复制选中报价的函数（根据当前视图决定格式）
-  const copySelectedQuotes = () => {
-    const selectedItems = allQuotes.filter(q => selectedQuotes.has(q.id));
+  const copySelectedQuotes = (selectedSet?: Set<string>) => {
+    // 使用传入的 Set 或当前的 selectedQuotes
+    const currentSelected = selectedSet || selectedQuotes;
+    const selectedItems = allQuotes.filter(q => currentSelected.has(q.id));
     if (selectedItems.length === 0) return;
 
     const sortedItems = sortSelectedQuotes(selectedItems);
@@ -1464,17 +1468,10 @@ const App: React.FC = () => {
                               // 点击行任意位置：切换选中
                               e.stopPropagation();
                               const isCtrl = e.ctrlKey;
-                              if (isCtrl) {
-                                // Ctrl 键：累加选中/取消
-                                toggleSelect(item.id, undefined, true);
-                              } else {
-                                // 非 Ctrl 键：只选中当前项
-                                toggleSelect(item.id, undefined, false);
-                              }
-                              // 任何选中状态变化后都自动复制所有选中的项
-                              setTimeout(() => {
-                                copySelectedQuotes();
-                              }, 0);
+                              // 获取最新的选中集合
+                              const newSelected = toggleSelect(item.id, undefined, isCtrl);
+                              // 任何选中状态变化后都自动复制所有选中的项（使用最新的选中集合）
+                              copySelectedQuotes(newSelected);
                             }}
                             onMouseDown={(e) => {
                               // 按下鼠标开始拖曳（Ctrl+ 拖曳累加选中）
@@ -1692,17 +1689,10 @@ const App: React.FC = () => {
                           // 点击行任意位置：切换选中
                           e.stopPropagation();
                           const isCtrl = e.ctrlKey;
-                          if (isCtrl) {
-                            // Ctrl 键：累加选中/取消
-                            toggleSelect(item.id, undefined, true);
-                          } else {
-                            // 非 Ctrl 键：只选中当前项
-                            toggleSelect(item.id, undefined, false);
-                          }
-                          // 任何选中状态变化后都自动复制所有选中的项
-                          setTimeout(() => {
-                            copySelectedQuotes();
-                          }, 0);
+                          // 获取最新的选中集合
+                          const newSelected = toggleSelect(item.id, undefined, isCtrl);
+                          // 任何选中状态变化后都自动复制所有选中的项（使用最新的选中集合）
+                          copySelectedQuotes(newSelected);
                         }}
                         onDoubleClick={(e) => {
                           // 双击进入编辑模式
