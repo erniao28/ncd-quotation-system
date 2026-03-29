@@ -11,7 +11,16 @@
       "Bash(cd /e/file/project_ai/cc_test/cd_test/frontend && npm run build 2>&1)",
       "Bash(npm run build 2>&1)",
       "Bash(ls -la E:/file/project_ai/cc_test/cd_test/*.md 2>/dev/null || echo \"No .md files in root\")",
-      "Bash(cd E:/file/project_ai/cc_test/cd_test/frontend && npm run build 2>&1)"
+      "Bash(cd E:/file/project_ai/cc_test/cd_test/frontend && npm run build 2>&1)",
+      "Bash(ssh:*)",
+      "Bash(icacls:*)",
+      "Bash(ping:*)",
+      "Bash(powershell -Command \"Test-NetConnection -ComputerName 121.40.35.46 -Port 22 -InformationLevel Quiet\")",
+      "Bash(powershell -Command \"Test-NetConnection -ComputerName 121.40.35.46 -Port 80 -InformationLevel Quiet\")",
+      "Bash(npm start:*)",
+      "Bash(npm run:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"fix: 修复 App.tsx 和数据库相关问题:*)"
     ]
   }
 }

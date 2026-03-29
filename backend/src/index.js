@@ -50,14 +50,16 @@ async function startServer() {
 
     // 启动服务器
     let PORT = process.env.PORT || 3000;
-    httpServer.listen(PORT, () => {
+    let HOST = process.env.HOST || '127.0.0.1';
+    httpServer.listen(PORT, HOST, () => {
       console.log(`
 ╔═══════════════════════════════════════════════════╗
 ║     NCD 报价管理系统后端服务启动成功               ║
 ╠═══════════════════════════════════════════════════╣
-║  HTTP API:    http://localhost:${PORT}              ║
-║  WebSocket:  ws://localhost:${PORT}                ║
-║  健康检查:    http://localhost:${PORT}/health        ║
+║  监听地址：  ${HOST}:${PORT}
+║  HTTP API:    http://${HOST}:${PORT}              ║
+║  WebSocket:  ws://${HOST}:${PORT}                ║
+║  健康检查：    http://${HOST}:${PORT}/health        ║
 ╚═══════════════════════════════════════════════════╝
       `);
     });

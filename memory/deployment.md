@@ -81,3 +81,97 @@ npm run dev
 - NCD 前端固定 5180 端口，不再每次递增
 - 如果 5180 被占用，自动尝试 5181
 - 后端 3000 被占用时自动尝试 3001、3002...
+
+---
+
+## 备份与恢复
+
+### 本地备份目录
+
+**位置**: `E:/file/backup/ncd-quotation-system/`
+
+存放服务器关键配置文件的本地备份，用于紧急恢复。
+
+### 从服务器下载备份（首次执行）
+
+```bash
+BACKUP_DIR="E:/file/backup/ncd-quotation-system"
+
+# Nginx 配置
+scp root@121.40.35.46:/etc/nginx/sites-available/ncd-quotation "$BACKUP_DIR/nginx/ncd-quotation.conf"
+scp root@121.40.35.46:/etc/nginx/sites-enabled/ncd-quotation "$BACKUP_DIR/nginx/ncd-quotation-enabled.conf"
+
+# 环境变量
+scp root@121.40.35.46:/root/ncd-quotation-system/backend/.env "$BACKUP_DIR/env/backend.env"
+
+# 数据库（可选，文件较大）
+scp root@121.40.35.46:/root/ncd-quotation-system/backend/data/ncd_data.db "$BACKUP_DIR/database/"
+```
+
+### 恢复到服务器
+
+**一键恢复脚本**: `E:/file/backup/ncd-quotation-system/scripts/restore-to-server.sh`
+
+```bash
+cd E:/file/backup/ncd-quotation-system/scripts
+bash restore-to-server.sh
+```
+
+### 服务器自动备份（可选）
+
+将 `scripts/auto-backup-server.sh` 上传到服务器并添加定时任务：
+
+```bash
+# 上传脚本
+scp scripts/auto-backup-server.sh root@121.40.35.46:/root/ncd-quotation-system/scripts/
+
+# 添加定时任务（每天凌晨 3 点备份，保留 7 天）
+crontab -e
+0 3 * * * /root/ncd-quotation-system/scripts/auto-backup-server.sh
+```
+
+---
+
+## 多项目共存注意事项
+
+### 配置隔离原则
+
+1. **Nginx 配置独立** - 每个项目使用独立的配置文件
+   - NCD: `/etc/nginx/sites-available/ncd-quotation`
+   - 其他项目：创建新的独立配置文件
+
+2. **后端端口隔离** - 每个后端服务监听不同端口
+   - NCD: 3000
+   - 其他项目：3001, 3002...
+
+3. **前端目录隔离** - 每个项目使用独立的前端目录
+   - NCD: `/var/www/ncd-quotation/` (推荐) 或 `/var/www/html/`
+   - 其他项目：`/var/www/{project-name}/`
+
+### 安全配置检查清单
+
+部署其他项目前，请确认：
+
+- [ ] NCD 配置文件已备份到本地
+- [ ] Nginx 配置不修改 `/etc/nginx/sites-available/ncd-quotation`
+- [ ] 新后端只监听 `127.0.0.1`，不绑定 `0.0.0.0`
+- [ ] 防火墙规则不被修改（只开放 22/80/443）
+- [ ] PM2 服务名称不冲突
+
+### 被误修改后的恢复流程
+
+1. 检查配置是否被修改
+   ```bash
+   ssh root@121.40.35.46 "nginx -t"
+   ssh root@121.40.35.46 "pm2 list"
+   ```
+
+2. 从本地备份恢复
+   ```bash
+   cd E:/file/backup/ncd-quotation-system/scripts
+   bash restore-to-server.sh
+   ```
+
+3. 验证服务正常
+   - 访问 http://121.40.35.46/
+   - 检查 WebSocket 连接是否正常

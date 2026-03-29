@@ -47,26 +47,41 @@ cd ../backend
 pm2 restart ncd-backend  # 或 npm start
 ```
 
-**Nginx 配置（仅参考，勿随意修改）**：
+**🔒 安全配置**：
+- 后端绑定 `127.0.0.1:3000`（不直接暴露到公网）
+- 防火墙开启：仅开放 22（SSH）、80（HTTP）、443（HTTPS）端口
+- 所有请求通过 Nginx 反向代理到后端
+- 详见 [服务器安全配置指南](./SERVER_SECURITY.md)
+
+**Nginx 配置（生产环境）**：
 ```nginx
 # /etc/nginx/sites-available/ncd-quotation
 server {
     listen 80;
     server_name 121.40.35.46;
 
+    # 基础认证（可选）
+    auth_basic "NCD 报价系统 - 授权访问";
+    auth_basic_user_file /etc/nginx/.htpasswd;
+
+    # 前端静态文件
+    root /var/www/html;
+    index index.html;
+
     location / {
-        proxy_pass http://localhost:5173;  # Vite 前端
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
+        try_files $uri $uri/ /index.html;
     }
 
+    # 后端 API 代理
     location /api {
-        proxy_pass http://localhost:3000;  # 后端 API
+        proxy_pass http://localhost:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
     }
 
+    # WebSocket 代理（Socket.io）
     location /socket.io {
-        proxy_pass http://localhost:3000;  # WebSocket
+        proxy_pass http://localhost:3000;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";

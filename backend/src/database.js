@@ -4,8 +4,8 @@ import { fileURLToPath } from 'url';
 import fs from 'fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dbPath = process.env.DB_PATH || './data/ncd_data.db';
-const fullDbPath = path.resolve(__dirname, '..', dbPath);
+const dbPath = process.env.DB_PATH || '../data/ncd_data.db';
+const fullDbPath = path.resolve(__dirname, dbPath);
 
 // 确保 data 目录存在
 const dataDir = path.dirname(fullDbPath);
