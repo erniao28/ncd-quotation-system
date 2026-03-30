@@ -23,7 +23,15 @@
       "Bash(git commit -m \"fix: 修复 App.tsx 和数据库相关问题:*)",
       "Bash(git push:*)",
       "WebFetch(domain:121.40.35.46)",
-      "Bash(git commit -m \"fix: 修正要素生成系统链接:*)"
+      "Bash(git commit -m \"fix: 修正要素生成系统链接:*)",
+      "Bash(scp:*)",
+      "Bash(curl -I http://121.40.35.46/)",
+      "Bash(npm install:*)",
+      "Bash(grep:*)",
+      "Bash(npx tsc:*)",
+      "Bash(node:*)",
+      "Bash(npx vite:*)",
+      "Bash(git commit -m \"feat: 新增数据支持功能:*)"
     ]
   }
 }

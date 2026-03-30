@@ -162,3 +162,93 @@ export {
   fetchMaturities,
   updateMaturities
 };
+
+// ========== 数据支持 API ==========
+
+export async function fetchSections() {
+  const res = await fetch(`${API_BASE}/data/sections`);
+  if (!res.ok) throw new Error('获取板块失败');
+  return res.json();
+}
+
+export async function createSection(section) {
+  const res = await fetch(`${API_BASE}/data/sections`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(section)
+  });
+  if (!res.ok) throw new Error('创建板块失败');
+  return res.json();
+}
+
+export async function deleteSection(id) {
+  const res = await fetch(`${API_BASE}/data/sections/${id}`, {
+    method: 'DELETE'
+  });
+  if (!res.ok) throw new Error('删除板块失败');
+  return res.json();
+}
+
+export async function updateSection(id, name) {
+  const res = await fetch(`${API_BASE}/data/sections/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name })
+  });
+  if (!res.ok) throw new Error('更新板块失败');
+  return res.json();
+}
+
+export async function fetchSectionFiles(sectionId) {
+  const res = await fetch(`${API_BASE}/data/sections/${sectionId}/files`);
+  if (!res.ok) throw new Error('获取文件列表失败');
+  return res.json();
+}
+
+export async function uploadFile(sectionId, filename, fileType, fileData) {
+  const res = await fetch(`${API_BASE}/data/sections/${sectionId}/files`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename, fileType, fileData })
+  });
+  if (!res.ok) throw new Error('上传文件失败');
+  return res.json();
+}
+
+export async function deleteFile(id) {
+  const res = await fetch(`${API_BASE}/data/files/${id}`, {
+    method: 'DELETE'
+  });
+  if (!res.ok) throw new Error('删除文件失败');
+  return res.json();
+}
+
+export async function getFile(id) {
+  const res = await fetch(`${API_BASE}/data/files/${id}`);
+  if (!res.ok) throw new Error('获取文件失败');
+  return res.json();
+}
+
+export async function fetchSectionAnalysis(sectionId) {
+  const res = await fetch(`${API_BASE}/data/sections/${sectionId}/analysis`);
+  if (!res.ok) throw new Error('获取分析数据失败');
+  return res.json();
+}
+
+export async function saveSectionAnalysis(sectionId, data) {
+  const res = await fetch(`${API_BASE}/data/sections/${sectionId}/analysis`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ data })
+  });
+  if (!res.ok) throw new Error('保存分析数据失败');
+  return res.json();
+}
+
+export async function deleteAnalysis(id) {
+  const res = await fetch(`${API_BASE}/data/analysis/${id}`, {
+    method: 'DELETE'
+  });
+  if (!res.ok) throw new Error('删除分析数据失败');
+  return res.json();
+}

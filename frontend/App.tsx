@@ -3,6 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Quotation, GroupedQuotation, MaturityInfo } from './types';
 import { parseQuotations, parseMaturityDates } from './services/parser';
 import { VisualCard } from './components/VisualCard';
+import { DataSupport } from './DataSupport';
 import {
   initSocket,
   setSocketListeners,
@@ -24,6 +25,8 @@ import html2canvas from 'html2canvas';
 const APP_VERSION = '20260310'; // 版本号：YYYYMMDD 格式
 
 const App: React.FC = () => {
+  // 视图模式：'quote' = 报价系统，'data' = 数据支持
+  const [viewMode, setViewMode] = useState<'quote' | 'data'>('quote');
   const [inputText, setInputText] = useState('');
   const [maturityInput, setMaturityInput] = useState('');
   const [isParsing, setIsParsing] = useState(false);
@@ -1044,12 +1047,33 @@ const App: React.FC = () => {
         <div className="flex items-center gap-3">
           <div className="bg-white text-indigo-600 p-1.5 rounded-xl font-bold text-lg">NCD.AI</div>
           <h1 className="text-lg font-bold text-white">一级报价系统</h1>
-          <span className={`text-[10px] px-2 py-0.5 rounded-full bg-white/20 ${isConnected ? 'text-emerald-300' : 'text-red-300'}`}>
-            {isConnected ? '● 已连接' : '○ 未连接'}
-          </span>
-          <span className="text-[9px] font-mono text-indigo-200 bg-white/10 px-2 py-0.5 rounded">v{APP_VERSION}</span>
+          {viewMode === 'quote' && (
+            <>
+              <span className={`text-[10px] px-2 py-0.5 rounded-full bg-white/20 ${isConnected ? 'text-emerald-300' : 'text-red-300'}`}>
+                {isConnected ? '● 已连接' : '○ 未连接'}
+              </span>
+              <span className="text-[9px] font-mono text-indigo-200 bg-white/10 px-2 py-0.5 rounded">v{APP_VERSION}</span>
+            </>
+          )}
         </div>
         <div className="flex items-center gap-3">
+          {/* 视图切换按钮 */}
+          <div className="flex items-center bg-white/10 rounded-lg p-1">
+            <button
+              onClick={() => setViewMode('quote')}
+              className={`px-3 py-1.5 rounded-md text-sm font-bold transition-all
+                ${viewMode === 'quote' ? 'bg-white text-indigo-600 shadow-sm' : 'text-white/80 hover:text-white hover:bg-white/10'}`}
+            >
+              报价
+            </button>
+            <button
+              onClick={() => setViewMode('data')}
+              className={`px-3 py-1.5 rounded-md text-sm font-bold transition-all
+                ${viewMode === 'data' ? 'bg-white text-indigo-600 shadow-sm' : 'text-white/80 hover:text-white hover:bg-white/10'}`}
+            >
+              数据支持
+            </button>
+          </div>
           <a
             href="/auto-quote/"
             target="_blank"
@@ -1065,6 +1089,14 @@ const App: React.FC = () => {
         </div>
       </nav>
 
+      {/* 数据支持视图 */}
+      {viewMode === 'data' && (
+        <DataSupport />
+      )}
+
+      {/* 报价系统视图 */}
+      {viewMode === 'quote' && (
+        <>
       {/* 功能操作栏 */}
       <header className="bg-white border-b border-slate-200 px-6 py-3 flex justify-between items-center shadow-sm">
         <div className="flex items-center gap-2">
@@ -1938,6 +1970,8 @@ const App: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+      </>
       )}
 
       <footer className="p-8 text-center text-[10px] text-slate-300 font-bold uppercase tracking-widest">
