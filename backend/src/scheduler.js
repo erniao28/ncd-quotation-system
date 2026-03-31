@@ -59,8 +59,14 @@ function shouldRunToday() {
 // 从 auto-quote 数据库同步数据
 async function syncFromAutoQuote() {
   try {
-    // auto-quote 数据库路径
-    const autoQuoteDbPath = path.resolve(__dirname, '../../auto-quote/backend/data/cd_quote.db');
+    // auto-quote 数据库路径（服务器环境）
+    let autoQuoteDbPath = '/var/www/auto-quote/backend/data/cd_quote.db';
+
+    // 检查数据库是否存在（服务器路径）
+    if (!fs.existsSync(autoQuoteDbPath)) {
+      // 尝试本地开发路径
+      autoQuoteDbPath = path.resolve(__dirname, '../../auto-quote/backend/data/cd_quote.db');
+    }
 
     // 检查数据库是否存在
     if (!fs.existsSync(autoQuoteDbPath)) {
