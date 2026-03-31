@@ -16,7 +16,8 @@ import {
   getIssuanceByDate,
   getAvailableIssueDates,
   getIssuanceByBank,
-  getMonthlyStats
+  getMonthlyStats,
+  syncIssuanceData
 } from '../database.js';
 
 const router = express.Router();
@@ -245,6 +246,21 @@ router.get('/issuance/stats/monthly', (req, res) => {
   } catch (error) {
     console.error('[API] 获取月度统计失败:', error);
     res.status(500).json({ error: '获取月度统计失败' });
+  }
+});
+
+// 同步发行量数据（从 auto-quote 系统）
+router.post('/issuance/sync', (req, res) => {
+  try {
+    const { quotes } = req.body;
+    if (!quotes || !Array.isArray(quotes)) {
+      return res.status(400).json({ error: '缺少数据参数' });
+    }
+    const result = syncIssuanceData(quotes);
+    res.json(result);
+  } catch (error) {
+    console.error('[API] 同步发行量数据失败:', error);
+    res.status(500).json({ error: '同步数据失败' });
   }
 });
 

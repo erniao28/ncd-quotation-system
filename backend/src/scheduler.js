@@ -1,12 +1,17 @@
 import cron from 'node-cron';
-import { saveDatabase } from './database.js';
+import { saveDatabase, syncIssuanceData } from './database.js';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import fs from 'fs';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /**
  * 发行量统计定时任务
  * 每个工作日 17:20 自动更新
  *
  * 注意：实际数据来自 auto-quote 系统的爬虫数据
- * 本模块只负责统计和展示，不负责爬取
+ * 本模块负责从 auto-quote 数据库同步数据并统计
  */
 
 // 判断是否为工作日
@@ -51,13 +56,61 @@ function shouldRunToday() {
   return isWorkday();
 }
 
+// 从 auto-quote 数据库同步数据
+async function syncFromAutoQuote() {
+  try {
+    // auto-quote 数据库路径
+    const autoQuoteDbPath = path.resolve(__dirname, '../../auto-quote/backend/data/cd_quote.db');
+
+    // 检查数据库是否存在
+    if (!fs.existsSync(autoQuoteDbPath)) {
+      console.log('[定时任务] auto-quote 数据库不存在:', autoQuoteDbPath);
+      return { success: false, reason: '数据库不存在' };
+    }
+
+    // 使用 sql.js 读取数据库
+    const initSqlJs = (await import('sql.js')).default;
+    const SQL = await initSqlJs();
+    const fileBuffer = fs.readFileSync(autoQuoteDbPath);
+    const autoQuoteDb = new SQL.Database(fileBuffer);
+
+    // 查询 temp_quotes 表
+    const results = autoQuoteDb.exec('SELECT * FROM temp_quotes');
+
+    if (!results || results.length === 0) {
+      console.log('[定时任务] auto-quote 数据库中没有 temp_quotes 表');
+      return { success: false, reason: '没有数据' };
+    }
+
+    // 转换为对象数组
+    const columns = results[0].columns;
+    const values = results[0].values;
+    const quotes = values.map(row => {
+      const obj = {};
+      columns.forEach((col, i) => {
+        obj[col] = row[i];
+      });
+      return obj;
+    });
+
+    // 同步到主数据库
+    const result = syncIssuanceData(quotes);
+    console.log('[定时任务] 同步成功，共', result.count, '条数据');
+
+    return { success: true, count: result.count };
+  } catch (error) {
+    console.error('[定时任务] 同步失败:', error);
+    return { success: false, error: error.message };
+  }
+}
+
 // 初始化定时任务
 export function initScheduler() {
   console.log('[定时任务] 初始化发行量统计任务...');
 
   // 每个工作日 17:20 执行
   // cron 表达式：minute hour day-of-month month day-of-week
-  const job = cron.schedule('20 17 * * 1-5', () => {
+  const job = cron.schedule('20 17 * * 1-5', async () => {
     const today = new Date();
     const dateStr = today.toISOString().slice(0, 10);
 
@@ -65,10 +118,12 @@ export function initScheduler() {
 
     if (shouldRunToday()) {
       console.log('[定时任务] 今天是工作日，执行统计任务');
-      // 注意：数据已经在 temp_quotes 表中，只需要保存数据库即可
-      // 实际的统计查询在前端进行，这里只需要确保数据已保存
-      saveDatabase();
-      console.log('[定时任务] 数据库已保存');
+      const result = await syncFromAutoQuote();
+      if (result.success) {
+        console.log('[定时任务] 数据同步完成，共', result.count, '条');
+      } else {
+        console.log('[定时任务] 数据同步失败:', result.reason || result.error);
+      }
     } else {
       console.log('[定时任务] 今天是节假日，跳过统计任务');
     }
@@ -78,6 +133,16 @@ export function initScheduler() {
   });
 
   console.log('[定时任务] 发行量统计任务已启动（每个工作日 17:20）');
+
+  // 开发模式：立即执行一次测试
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('[定时任务] 开发模式：5 秒后执行一次测试同步...');
+    setTimeout(async () => {
+      console.log('[定时任务] 执行测试同步...');
+      const result = await syncFromAutoQuote();
+      console.log('[定时任务] 测试结果:', result);
+    }, 5000);
+  }
 
   return job;
 }

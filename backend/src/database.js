@@ -107,6 +107,28 @@ async function initDatabase() {
     )
   `);
 
+  // 发行量统计表（从 auto-quote 系统同步）
+  db.run(`
+    CREATE TABLE IF NOT EXISTS temp_quotes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      bank_name TEXT NOT NULL,
+      issue_name TEXT,
+      volume TEXT,
+      tenor TEXT,
+      ref_yield TEXT,
+      issue_date TEXT NOT NULL,
+      created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
+    )
+  `);
+
+  // 创建索引以提高查询性能
+  try {
+    db.run(`CREATE INDEX IF NOT EXISTS idx_issue_date ON temp_quotes(issue_date)`);
+    db.run(`CREATE INDEX IF NOT EXISTS idx_bank_name ON temp_quotes(bank_name)`);
+  } catch (e) {
+    console.log('[数据库] 索引创建跳过');
+  }
+
   // 初始化默认板块
   const defaultSections = [
     { id: 'maturity_date', name: '到期日', is_custom: 0 },
@@ -456,6 +478,32 @@ function getMonthlyStats(yearMonth) {
   return results;
 }
 
+// 同步发行量数据（从 auto-quote 系统）
+function syncIssuanceData(quotes) {
+  // 清除旧数据
+  db.run('DELETE FROM temp_quotes');
+
+  // 插入新数据
+  const stmt = db.prepare(`
+    INSERT INTO temp_quotes (bank_name, issue_name, volume, tenor, ref_yield, issue_date)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+
+  for (const quote of quotes) {
+    stmt.run([
+      quote.bank_name,
+      quote.issue_name || '',
+      quote.volume || '',
+      quote.tenor || '',
+      quote.ref_yield || '',
+      quote.issue_date
+    ]);
+  }
+
+  saveDatabase();
+  return { success: true, count: quotes.length };
+}
+
 export {
   initDatabase,
   saveDatabase,
@@ -484,5 +532,6 @@ export {
   getIssuanceByDate,
   getAvailableIssueDates,
   getIssuanceByBank,
-  getMonthlyStats
+  getMonthlyStats,
+  syncIssuanceData
 };
