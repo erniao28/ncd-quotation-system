@@ -9,11 +9,12 @@
     "dev": "node --watch src/index.js"
   },
   "dependencies": {
-    "sql.js": "^1.11.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "node-cron": "^4.2.1",
     "socket.io": "^4.8.1",
+    "sql.js": "^1.11.0",
     "uuid": "^11.0.5"
   }
 }

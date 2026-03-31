@@ -58,27 +58,39 @@ export const DataPanel: React.FC<DataPanelProps> = ({ sectionId, sectionName, on
     const selectedFile = e.target.files?.[0];
     if (!selectedFile) return;
 
+    console.log('[文件上传] 文件信息:', {
+      name: selectedFile.name,
+      type: selectedFile.type,
+      size: selectedFile.size
+    });
+
     // 检查文件类型
     const fileType = selectedFile.type;
     let category = 'other';
-    if (fileType.includes('excel') || fileType.includes('spreadsheet') || selectedFile.name.endsWith('.xlsx') || selectedFile.name.endsWith('.xls')) {
+    if (fileType.includes('excel') || fileType.includes('spreadsheet') || fileType.includes('office') || selectedFile.name.endsWith('.xlsx') || selectedFile.name.endsWith('.xls')) {
       category = 'excel';
     } else if (fileType.includes('pdf') || selectedFile.name.endsWith('.pdf')) {
       category = 'pdf';
-    } else if (fileType.includes('image') || selectedFile.name.endsWith('.png') || selectedFile.name.endsWith('.jpg') || selectedFile.name.endsWith('.jpeg')) {
+    } else if (fileType.includes('image') || selectedFile.name.endsWith('.png') || selectedFile.name.endsWith('.jpg') || selectedFile.name.endsWith('.jpeg') || selectedFile.name.endsWith('.gif')) {
       category = 'image';
     }
+
+    console.log('[文件上传] 分类:', category);
 
     setUploading(true);
     try {
       // 读取文件为 Base64
       const fileData = await readFileAsBase64(selectedFile);
-      await uploadFile(sectionId, selectedFile.name, category, fileData);
+      console.log('[文件上传] Base64 长度:', fileData.length);
+
+      const result = await uploadFile(sectionId, selectedFile.name, category, fileData);
+      console.log('[文件上传] 上传结果:', result);
+
       await loadData();
       alert('上传成功');
-    } catch (error) {
-      console.error('上传失败:', error);
-      alert('上传失败');
+    } catch (error: any) {
+      console.error('[文件上传] 失败:', error);
+      alert('上传失败：' + (error.message || '未知错误'));
     } finally {
       setUploading(false);
       if (fileInputRef.current) {
@@ -122,6 +134,21 @@ export const DataPanel: React.FC<DataPanelProps> = ({ sectionId, sectionName, on
     } catch (error) {
       console.error('下载失败:', error);
       alert('下载失败');
+    }
+  };
+
+  // 预览图片
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
+
+  const handlePreviewImage = async (file: DataFile) => {
+    try {
+      const fileData = await fetch(`/api/data/files/${file.id}`).then(r => r.json());
+      if (fileData.file_data) {
+        setPreviewImage(fileData.file_data);
+      }
+    } catch (error) {
+      console.error('预览失败:', error);
+      alert('预览失败');
     }
   };
 
@@ -235,7 +262,21 @@ export const DataPanel: React.FC<DataPanelProps> = ({ sectionId, sectionName, on
                       </div>
                     </div>
                   </div>
+                  {/* 图片预览 */}
+                  {file.file_type === 'image' && file.file_data && (
+                    <div className="mt-3 rounded-lg overflow-hidden border border-slate-200">
+                      <img src={file.file_data} alt={file.filename} className="w-full h-32 object-cover" />
+                    </div>
+                  )}
                   <div className="flex gap-2 mt-3">
+                    {file.file_type === 'image' && (
+                      <button
+                        onClick={() => handlePreviewImage(file)}
+                        className="flex-1 px-2 py-1 bg-indigo-100 text-indigo-700 text-xs font-bold rounded hover:bg-indigo-200 transition-all"
+                      >
+                        预览
+                      </button>
+                    )}
                     <button
                       onClick={() => handleDownloadFile(file)}
                       className="flex-1 px-2 py-1 bg-slate-100 text-slate-700 text-xs font-bold rounded hover:bg-slate-200 transition-all"
@@ -251,6 +292,24 @@ export const DataPanel: React.FC<DataPanelProps> = ({ sectionId, sectionName, on
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* 图片预览弹窗 */}
+          {previewImage && (
+            <div
+              className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
+              onClick={() => setPreviewImage(null)}
+            >
+              <div className="relative max-w-full max-h-full">
+                <img src={previewImage} alt="预览" className="max-w-full max-h-[90vh] object-contain" />
+                <button
+                  onClick={() => setPreviewImage(null)}
+                  className="absolute top-4 right-4 text-white text-4xl font-bold hover:text-gray-300"
+                >
+                  ×
+                </button>
+              </div>
             </div>
           )}
         </div>

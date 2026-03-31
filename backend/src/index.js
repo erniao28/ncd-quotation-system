@@ -8,6 +8,7 @@ import apiRouter from './routes/api.js';
 import dataRouter from './routes/data.js';
 import { setupSocket } from './socket.js';
 import { initDatabase } from './database.js';
+import { initScheduler } from './scheduler.js';
 
 // 加载环境变量
 dotenv.config();
@@ -39,6 +40,9 @@ async function startServer() {
   try {
     await initDatabase();
     console.log('[数据库] 初始化完成');
+
+    // 初始化定时任务
+    initScheduler();
 
     // 初始化 WebSocket
     const io = new Server(httpServer, {

@@ -31,7 +31,13 @@
       "Bash(npx tsc:*)",
       "Bash(node:*)",
       "Bash(npx vite:*)",
-      "Bash(git commit -m \"feat: 新增数据支持功能:*)"
+      "Bash(git commit -m \"feat: 新增数据支持功能:*)",
+      "Bash(netstat -ano)",
+      "Bash(findstr :3000)",
+      "Bash(taskkill:*)",
+      "Bash(wmic process:*)",
+      "Bash(powershell -Command \"Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess\")",
+      "Bash(powershell -Command \"Stop-Process -Id 2332 -Force\")"
     ]
   }
 }

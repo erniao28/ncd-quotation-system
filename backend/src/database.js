@@ -382,8 +382,83 @@ function deleteAnalysisData(id) {
   return { id };
 }
 
+// ========== 发行量统计操作（从 auto-quote 系统获取数据）==========
+
+// 获取指定日期的发行量数据
+function getIssuanceByDate(date) {
+  const stmt = db.prepare(`
+    SELECT bank_name, issue_name, volume, tenor, ref_yield
+    FROM temp_quotes
+    WHERE issue_date = ?
+    ORDER BY bank_name, issue_name
+  `);
+  stmt.bind([date]);
+  const results = [];
+  while (stmt.step()) {
+    results.push(stmt.getAsObject());
+  }
+  stmt.free();
+  return results;
+}
+
+// 获取所有可用的发行日期
+function getAvailableIssueDates() {
+  const stmt = db.prepare(`
+    SELECT DISTINCT issue_date as date
+    FROM temp_quotes
+    ORDER BY issue_date DESC
+  `);
+  const results = [];
+  while (stmt.step()) {
+    results.push(stmt.getAsObject());
+  }
+  stmt.free();
+  return results;
+}
+
+// 按银行统计发行量（指定日期范围内）
+function getIssuanceByBank(startDate, endDate) {
+  const stmt = db.prepare(`
+    SELECT bank_name,
+           COUNT(*) as count,
+           SUM(CAST(REPLACE(REPLACE(volume, '亿元', ''), '亿', '') AS REAL) || 0) as total_volume
+    FROM temp_quotes
+    WHERE issue_date >= ? AND issue_date <= ?
+    GROUP BY bank_name
+    ORDER BY total_volume DESC
+  `);
+  stmt.bind([startDate, endDate]);
+  const results = [];
+  while (stmt.step()) {
+    results.push(stmt.getAsObject());
+  }
+  stmt.free();
+  return results;
+}
+
+// 获取月度统计
+function getMonthlyStats(yearMonth) {
+  const stmt = db.prepare(`
+    SELECT bank_name,
+           COUNT(*) as count,
+           SUM(CAST(REPLACE(REPLACE(volume, '亿元', ''), '亿', '') AS REAL) || 0) as total_volume
+    FROM temp_quotes
+    WHERE issue_date LIKE ?
+    GROUP BY bank_name
+    ORDER BY total_volume DESC
+  `);
+  stmt.bind([yearMonth + '%']);
+  const results = [];
+  while (stmt.step()) {
+    results.push(stmt.getAsObject());
+  }
+  stmt.free();
+  return results;
+}
+
 export {
   initDatabase,
+  saveDatabase,
   getAllQuotations,
   addQuotation,
   updateQuotation,
@@ -404,5 +479,10 @@ export {
   getFileById,
   getSectionAnalysis,
   addAnalysisData,
-  deleteAnalysisData
+  deleteAnalysisData,
+  // 发行量统计
+  getIssuanceByDate,
+  getAvailableIssueDates,
+  getIssuanceByBank,
+  getMonthlyStats
 };

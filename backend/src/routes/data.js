@@ -11,7 +11,12 @@ import {
   getFileById,
   getSectionAnalysis,
   addAnalysisData,
-  deleteAnalysisData
+  deleteAnalysisData,
+  // 发行量统计
+  getIssuanceByDate,
+  getAvailableIssueDates,
+  getIssuanceByBank,
+  getMonthlyStats
 } from '../database.js';
 
 const router = express.Router();
@@ -185,6 +190,61 @@ router.delete('/analysis/:id', (req, res) => {
   } catch (error) {
     console.error('[API] 删除分析数据失败:', error);
     res.status(500).json({ error: '删除分析数据失败' });
+  }
+});
+
+// ========== 发行量统计 API ==========
+
+// 获取可用的发行日期列表
+router.get('/issuance/dates', (req, res) => {
+  try {
+    const dates = getAvailableIssueDates();
+    res.json(dates);
+  } catch (error) {
+    console.error('[API] 获取日期列表失败:', error);
+    res.status(500).json({ error: '获取日期列表失败' });
+  }
+});
+
+// 获取指定日期的发行量明细
+router.get('/issuance/:date', (req, res) => {
+  try {
+    const { date } = req.params;
+    const data = getIssuanceByDate(date);
+    res.json(data);
+  } catch (error) {
+    console.error('[API] 获取发行量数据失败:', error);
+    res.status(500).json({ error: '获取发行量数据失败' });
+  }
+});
+
+// 获取银行统计（日期范围）
+router.get('/issuance/stats/bank', (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    if (!startDate || !endDate) {
+      return res.status(400).json({ error: '缺少日期参数' });
+    }
+    const data = getIssuanceByBank(startDate, endDate);
+    res.json(data);
+  } catch (error) {
+    console.error('[API] 获取银行统计失败:', error);
+    res.status(500).json({ error: '获取银行统计失败' });
+  }
+});
+
+// 获取月度统计
+router.get('/issuance/stats/monthly', (req, res) => {
+  try {
+    const { month } = req.query;
+    if (!month) {
+      return res.status(400).json({ error: '缺少月份参数' });
+    }
+    const data = getMonthlyStats(month);
+    res.json(data);
+  } catch (error) {
+    console.error('[API] 获取月度统计失败:', error);
+    res.status(500).json({ error: '获取月度统计失败' });
   }
 });
 

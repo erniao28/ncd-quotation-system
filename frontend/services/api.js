@@ -252,3 +252,23 @@ export async function deleteAnalysis(id) {
   if (!res.ok) throw new Error('删除分析数据失败');
   return res.json();
 }
+
+// ========== 发行量统计 API ==========
+
+export async function fetchIssuanceDates() {
+  const res = await fetch(`${API_BASE}/data/issuance/dates`);
+  if (!res.ok) throw new Error('获取日期列表失败');
+  return res.json();
+}
+
+export async function fetchIssuanceByDate(date) {
+  const res = await fetch(`${API_BASE}/data/issuance/${date}`);
+  if (!res.ok) throw new Error('获取发行量数据失败');
+  return res.json();
+}
+
+export async function fetchMonthlyStats(month) {
+  const res = await fetch(`${API_BASE}/data/issuance/stats/monthly?month=${month}`);
+  if (!res.ok) throw new Error('获取月度统计失败');
+  return res.json();
+}
