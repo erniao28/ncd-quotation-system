@@ -38,8 +38,6 @@ const App: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterTenor, setFilterTenor] = useState('ALL');
   const [filterRating, setFilterRating] = useState('ALL');
-  const [sortOrder, setSortOrder] = useState<'ASC' | 'DESC'>('DESC');
-  const [sortBy, setSortBy] = useState<'YIELD' | 'TIME'>('YIELD');
 
   // 单条列表视图的排序
   const [listSortBy, setListSortBy] = useState<'TIME' | 'YIELD' | 'VOLUME'>('TIME');
@@ -482,22 +480,8 @@ const App: React.FC = () => {
       }
     }
 
-    // 排序逻辑
-    result.sort((a, b) => {
-      if (sortBy === 'TIME') {
-        // 按更新时间排序
-        const timeA = a.updatedAt || a.createdAt || 0;
-        const timeB = b.updatedAt || b.createdAt || 0;
-        return sortOrder === 'ASC' ? timeA - timeB : timeB - timeA;
-      } else {
-        // 按收益率排序
-        const valA = parseFloat(a.yieldRate.replace(/[^\d.]/g, '')) || 0;
-        const valB = parseFloat(b.yieldRate.replace(/[^\d.]/g, '')) || 0;
-        return sortOrder === 'ASC' ? valA - valB : valB - valA;
-      }
-    });
     return result;
-  }, [allQuotes, searchTerm, filterTenor, filterRating, sortOrder, sortBy]);
+  }, [allQuotes, searchTerm, filterTenor, filterRating]);
 
   // 手动刷新函数
   const handleRefresh = async () => {
@@ -1523,20 +1507,7 @@ const App: React.FC = () => {
                     <option value="BIG">大行</option>
                     <option value="AAA">AAA</option>
                     <option value="AA+">AA+</option>
-                    
                  </select>
-                 <select
-                  value={sortBy}
-                  onChange={e => setSortBy(e.target.value as 'YIELD' | 'TIME')}
-                  className="bg-slate-50 border border-slate-200 px-2 py-2 rounded-xl text-xs"
-                  title="排序方式"
-                 >
-                    <option value="YIELD">收益率排序</option>
-                    <option value="TIME">时间排序</option>
-                 </select>
-                 <button onClick={() => setSortOrder(o => o === 'ASC' ? 'DESC' : 'ASC')} className="p-2 bg-slate-50 border border-slate-200 rounded-xl hover:bg-slate-100 transition-colors" title="倒序/正序">
-                    <svg className={`w-4 h-4 text-slate-500 transition-transform ${sortOrder === 'ASC' ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7" strokeWidth="2" /></svg>
-                 </button>
                  <button onClick={handleRefresh} className="p-2 bg-indigo-50 border border-indigo-200 rounded-xl hover:bg-indigo-100 transition-colors" title="刷新数据">
                     <svg className="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
                  </button>
