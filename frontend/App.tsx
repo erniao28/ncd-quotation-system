@@ -22,7 +22,7 @@ import {
 } from './services/api';
 import html2canvas from 'html2canvas';
 
-const APP_VERSION = '20260310'; // 版本号：YYYYMMDD 格式
+const APP_VERSION = '20260412'; // 版本号：YYYYMMDD 格式
 
 const App: React.FC = () => {
   // 视图模式：'quote' = 报价系统，'data' = 数据支持
