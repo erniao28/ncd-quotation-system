@@ -42,7 +42,7 @@ const App: React.FC = () => {
   const [sortBy, setSortBy] = useState<'YIELD' | 'TIME'>('YIELD');
 
   // 单条列表视图的排序
-  const [listSortBy, setListSortBy] = useState<'TIME' | 'YIELD'>('TIME');
+  const [listSortBy, setListSortBy] = useState<'TIME' | 'YIELD' | 'VOLUME'>('TIME');
   const [listSortOrder, setListSortOrder] = useState<'ASC' | 'DESC'>('DESC');
 
   const [activeTab, setActiveTab] = useState<'VISUAL' | 'TEXT' | 'LIST'>('VISUAL');
@@ -538,10 +538,15 @@ const App: React.FC = () => {
         const timeA = a.updatedAt || a.createdAt || 0;
         const timeB = b.updatedAt || b.createdAt || 0;
         return listSortOrder === 'ASC' ? timeA - timeB : timeB - timeA;
-      } else {
+      } else if (listSortBy === 'YIELD') {
         const valA = parseFloat(a.yieldRate.replace(/[^\d.]/g, '')) || 0;
         const valB = parseFloat(b.yieldRate.replace(/[^\d.]/g, '')) || 0;
         return listSortOrder === 'ASC' ? valA - valB : valB - valA;
+      } else {
+        // 按募集量排序
+        const volA = parseFloat((a.volume || '0').replace(/[^0-9.]/g, '')) || 0;
+        const volB = parseFloat((b.volume || '0').replace(/[^0-9.]/g, '')) || 0;
+        return listSortOrder === 'ASC' ? volA - volB : volB - volA;
       }
     });
 
@@ -976,11 +981,10 @@ const App: React.FC = () => {
     const selectedItems = allQuotes.filter(q => currentSelected.has(q.id));
     if (selectedItems.length === 0) return;
 
-    const sortedItems = sortSelectedQuotes(selectedItems);
-
     if (activeTab === 'TEXT') {
-      // 文字版：使用分期限格式复制
-      const byTenor: Record<string, typeof selectedItems> = {};
+      // 文字版：使用分期限格式复制，按期限 → 类别 → 收益率排序
+      const sortedItems = sortSelectedQuotes(selectedItems);
+      const byTenor: Record<string, typeof sortedItems> = {};
       for (const item of sortedItems) {
         const tenorKey = item.tenor;
         if (!byTenor[tenorKey]) byTenor[tenorKey] = [];
@@ -1002,7 +1006,11 @@ const App: React.FC = () => {
       setCopySuccessMsg(`已复制 ${selectedItems.length} 条报价`);
       setTimeout(() => setCopySuccessMsg(''), 1500);
     } else if (activeTab === 'LIST') {
-      // 单条更新：使用纯文本格式复制
+      // 单条更新：按照当前列表的排序顺序复制（保持用户看到的顺序）
+      const sortedIds = sortedListQuotes.map(i => i.id);
+      const sortedItems = [...selectedItems].sort((a, b) => {
+        return sortedIds.indexOf(a.id) - sortedIds.indexOf(b.id);
+      });
       const text = sortedItems.map(i => {
         const vol = i.volume ? ` ${i.volume}` : '';
         const remarks = i.remarks ? ` ${i.remarks}` : '';
@@ -1722,11 +1730,12 @@ const App: React.FC = () => {
                   <div className="flex gap-2">
                     <select
                       value={listSortBy}
-                      onChange={e => setListSortBy(e.target.value as 'TIME' | 'YIELD')}
+                      onChange={e => setListSortBy(e.target.value as 'TIME' | 'YIELD' | 'VOLUME')}
                       className="bg-white border border-slate-200 px-2 py-1.5 rounded-lg text-[9px] font-bold"
                     >
                       <option value="TIME">按时间</option>
                       <option value="YIELD">按收益率</option>
+                      <option value="VOLUME">按募集量</option>
                     </select>
                     <button
                       onClick={() => setListSortOrder(o => o === 'ASC' ? 'DESC' : 'ASC')}
