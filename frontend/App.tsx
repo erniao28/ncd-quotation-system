@@ -389,7 +389,7 @@ const App: React.FC = () => {
     }
   };
 
-  // 点击行选中并复制
+  // 点击行选中
   const handleRowClick = (id: string, item: Quotation, event: React.MouseEvent) => {
     // 处理选中逻辑（支持 Ctrl 多选）
     setSelectedQuotes(prev => {
@@ -415,11 +415,8 @@ const App: React.FC = () => {
       return newSet;
     });
 
-    // 自动复制该行内容
-    const text = `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}${item.volume ? ' ' + item.volume : ''}${item.remarks ? ' ' + item.remarks : ''}`.trim();
-    copyToClipboard(text);
-    setCopySuccessMsg('已复制');
-    setTimeout(() => setCopySuccessMsg(''), 1500);
+    // 设置标志，让 useEffect 处理复制（确保复制内容来自选中的 ID，而非闭包中的 item）
+    setUserChangedSelection(true);
   };
 
   // 手动更新到期日（批量更新所有相同期限的报价）
@@ -1034,11 +1031,65 @@ const App: React.FC = () => {
 
   // 监听选中状态变化，自动复制
   useEffect(() => {
-    if (userChangedSelection && selectedQuotes.size > 0) {
-      copySelectedQuotes(selectedQuotes);
+    if (!userChangedSelection || selectedQuotes.size === 0) return;
+
+    // 从 allQuotes 中获取选中的项（确保使用最新数据）
+    const selectedItems = allQuotes.filter(q => selectedQuotes.has(q.id));
+    if (selectedItems.length === 0) {
       setUserChangedSelection(false);
+      return;
     }
-  }, [selectedQuotes]);
+
+    // 根据当前视图决定复制格式
+    let text = '';
+    if (activeTab === 'TEXT') {
+      // 文字版：使用分期限格式复制，按期限 → 类别 → 收益率排序
+      const sortedItems = sortSelectedQuotes(selectedItems);
+      const byTenor: Record<string, typeof sortedItems> = {};
+      for (const item of sortedItems) {
+        const tenorKey = item.tenor;
+        if (!byTenor[tenorKey]) byTenor[tenorKey] = [];
+        byTenor[tenorKey].push(item);
+      }
+      const tenorOrder = ['1M', '3M', '6M', '9M', '1Y'];
+      for (const tenor of tenorOrder) {
+        if (byTenor[tenor] && byTenor[tenor].length > 0) {
+          text += `(${tenor} 到期日 ${byTenor[tenor][0].maturityDate} ${byTenor[tenor][0].maturityWeekday})\n`;
+          for (const item of byTenor[tenor]) {
+            const vol = item.volume ? ` ${item.volume}` : '';
+            const remarks = item.remarks ? ` ${item.remarks}` : '';
+            text += `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}${vol}${remarks}\n`;
+          }
+        }
+      }
+    } else if (activeTab === 'LIST') {
+      // 单条更新：按照当前列表的排序顺序复制（保持用户看到的顺序）
+      const sortedIds = sortedListQuotes.map(i => i.id);
+      const sortedItems = [...selectedItems].sort((a, b) => {
+        return sortedIds.indexOf(a.id) - sortedIds.indexOf(b.id);
+      });
+      for (const i of sortedItems) {
+        const vol = i.volume ? ` ${i.volume}` : '';
+        const remarks = i.remarks ? ` ${i.remarks}` : '';
+        text += `${i.bankName} ${i.rating} ${i.weekday} ${i.tenor} ${i.yieldRate}${vol}${remarks}\n`;
+      }
+    } else {
+      // 看板视图：简单格式
+      for (const i of selectedItems) {
+        const vol = i.volume ? ` ${i.volume}` : '';
+        const remarks = i.remarks ? ` ${i.remarks}` : '';
+        text += `${i.bankName} ${i.rating} ${i.weekday} ${i.tenor} ${i.yieldRate}${vol}${remarks}\n`;
+      }
+    }
+
+    if (text) {
+      copyToClipboard(text.trim());
+      setCopySuccessMsg(`已复制 ${selectedItems.length} 条报价`);
+      setTimeout(() => setCopySuccessMsg(''), 1500);
+    }
+
+    setUserChangedSelection(false);
+  }, [selectedQuotes, userChangedSelection, activeTab, allQuotes, sortedListQuotes]);
 
   const selectAll = () => {
     setSelectedQuotes(new Set(filteredQuotes.map(q => q.id)));
