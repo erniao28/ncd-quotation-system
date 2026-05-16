@@ -14,6 +14,7 @@ interface DataFile {
   filename: string;
   file_type: string;
   uploaded_at: number;
+  file_data?: string;
 }
 
 interface AnalysisData {
@@ -34,6 +35,10 @@ export const DataPanel: React.FC<DataPanelProps> = ({ sectionId, sectionName, on
   const [uploading, setUploading] = useState(false);
   const [activeTab, setActiveTab] = useState<'files' | 'analysis'>('files');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 图片日期筛选和轮播
+  const [dateFilter, setDateFilter] = useState<string>('');
+  const carouselRef = useRef<HTMLDivElement>(null);
 
   // 加载文件和分析数据
   const loadData = async () => {
@@ -181,6 +186,42 @@ export const DataPanel: React.FC<DataPanelProps> = ({ sectionId, sectionName, on
     return new Date(timestamp).toLocaleString('zh-CN');
   };
 
+  // 时间戳转 YYYY-MM-DD
+  const timestampToDateStr = (timestamp: number) => {
+    const d = new Date(timestamp);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  // 根据日期筛选图片文件
+  const filteredFiles = dateFilter
+    ? files.filter(f => timestampToDateStr(f.uploaded_at) === dateFilter)
+    : files;
+
+  const imageFiles = filteredFiles.filter(f => f.file_type === 'image' && f.file_data);
+
+  // 轮播滚动
+  const scrollCarousel = (direction: 'left' | 'right') => {
+    if (carouselRef.current) {
+      const scrollAmount = 220;
+      carouselRef.current.scrollBy({
+        left: direction === 'left' ? -scrollAmount : scrollAmount,
+        behavior: 'smooth'
+      });
+    }
+  };
+
+  // 点击图片预览
+  const previewImageFromData = (dataUrl: string, fallbackFile?: DataFile) => {
+    if (dataUrl) {
+      setPreviewImage(dataUrl);
+    } else if (fallbackFile) {
+      handlePreviewImage(fallbackFile);
+    }
+  };
+
   // 获取文件类型图标
   const getFileIcon = (type: string) => {
     switch (type) {
@@ -264,14 +305,18 @@ export const DataPanel: React.FC<DataPanelProps> = ({ sectionId, sectionName, on
                   </div>
                   {/* 图片预览 */}
                   {file.file_type === 'image' && file.file_data && (
-                    <div className="mt-3 rounded-lg overflow-hidden border border-slate-200">
+                    <div
+                      className="mt-3 rounded-lg overflow-hidden border border-slate-200 cursor-pointer hover:shadow-md transition-shadow"
+                      onClick={() => previewImageFromData(file.file_data!)}
+                      title="点击查看大图"
+                    >
                       <img src={file.file_data} alt={file.filename} className="w-full h-32 object-cover" />
                     </div>
                   )}
                   <div className="flex gap-2 mt-3">
                     {file.file_type === 'image' && (
                       <button
-                        onClick={() => handlePreviewImage(file)}
+                        onClick={() => previewImageFromData(file.file_data!)}
                         className="flex-1 px-2 py-1 bg-indigo-100 text-indigo-700 text-xs font-bold rounded hover:bg-indigo-200 transition-all"
                       >
                         预览
@@ -292,6 +337,96 @@ export const DataPanel: React.FC<DataPanelProps> = ({ sectionId, sectionName, on
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* 日期筛选和图片轮播 */}
+          {files.length > 0 && (
+            <div className="mt-4 pt-4 border-t border-slate-200">
+              {/* 日期筛选 */}
+              <div className="flex items-center gap-3 mb-4">
+                <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                <span className="text-sm font-bold text-slate-600">按日期筛选：</span>
+                <input
+                  type="date"
+                  value={dateFilter}
+                  onChange={(e) => setDateFilter(e.target.value)}
+                  className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+                {dateFilter && (
+                  <button
+                    onClick={() => setDateFilter('')}
+                    className="text-xs text-indigo-600 hover:text-indigo-800 font-bold"
+                  >
+                    清除筛选
+                  </button>
+                )}
+                {dateFilter && (
+                  <span className="text-xs text-slate-400">
+                    共 {filteredFiles.length} 个文件
+                  </span>
+                )}
+              </div>
+
+              {/* 图片轮播导航 */}
+              {imageFiles.length > 1 && (
+                <div className="relative">
+                  <div className="text-xs font-bold text-slate-500 mb-2 flex items-center gap-2">
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                    图片导航（{imageFiles.length} 张）
+                  </div>
+                  <button
+                    onClick={() => scrollCarousel('left')}
+                    className="absolute left-0 top-1/2 -translate-y-1/2 z-10 w-8 h-8 bg-white/90 border border-slate-200 rounded-full shadow-lg flex items-center justify-center hover:bg-indigo-50 hover:border-indigo-300 transition-all -ml-3"
+                  >
+                    <svg className="w-4 h-4 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                    </svg>
+                  </button>
+                  <div
+                    ref={carouselRef}
+                    className="flex gap-3 overflow-x-auto scrollbar-hide py-2 px-1"
+                    style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+                  >
+                    {imageFiles.map((file) => (
+                      <div
+                        key={file.id}
+                        className="flex-shrink-0 w-44 group"
+                      >
+                        <div
+                          className="relative rounded-lg overflow-hidden border-2 border-slate-200 hover:border-indigo-400 cursor-pointer transition-all"
+                          onClick={() => previewImageFromData(file.file_data!)}
+                          title={file.filename}
+                        >
+                          <img
+                            src={file.file_data}
+                            alt={file.filename}
+                            className="w-44 h-28 object-cover"
+                          />
+                          <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[10px] px-2 py-1 truncate">
+                            {file.filename}
+                          </div>
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-1 truncate text-center">
+                          {formatDate(file.uploaded_at)}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => scrollCarousel('right')}
+                    className="absolute right-0 top-1/2 -translate-y-1/2 z-10 w-8 h-8 bg-white/90 border border-slate-200 rounded-full shadow-lg flex items-center justify-center hover:bg-indigo-50 hover:border-indigo-300 transition-all -mr-3"
+                  >
+                    <svg className="w-4 h-4 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
