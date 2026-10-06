@@ -304,7 +304,7 @@ function findVolume(text: string): string {
   ];
 
   for (const pattern of patterns) {
-    const match = text.match(pattern);
+    const match = text.match(pattern);2
     if (match) {
       if (text.includes('亿') || text.includes('億')) {
         return match[1] + '亿';
@@ -370,74 +370,50 @@ export function parseQuotations(text: string, defaultWeekday: string = '周一')
   // 按行、逗号、分号分割
   const lines = text.split(/[\n,，;；]+/).filter(line => line.trim());
 
-  // 第一步：先扫描整段文本找到银行名（可能在任意位置）
-  let foundBankName = '';
-  for (const line of lines) {
-    // 先检查整行是否有银行名
-    const bankInLine = findBank(line);
-    if (bankInLine) {
-      foundBankName = bankInLine;
-      break;
-    }
-    // 检查每行的最后一个词
-    const words = line.trim().split(/\s+/);
-    if (words.length > 0) {
-      const lastWord = words[words.length - 1];
-      const bank = findBank(lastWord);
-      if (bank) {
-        foundBankName = bank;
-        break;
-      }
-    }
-    // 也检查每行的第一个词
-    if (words.length > 0) {
-      const firstWord = words[0];
-      const bank = findBank(firstWord);
-      if (bank) {
-        foundBankName = bank;
-        break;
-      }
-    }
-  }
-
-  const results = [];
-  const bankName = foundBankName; // 整段统一用这个银行名
-
+  // 逐行清洗 + 纠错（工行→工商银行 等），后续银行识别/删除都基于纠错后的文本
+  const cleanedLines: string[] = [];
   for (const line of lines) {
     let trimmed = line.trim();
-    if (trimmed.length < 1) continue;
-
     // 去掉日期和时间（如 2026/02/26, 10:30, 上午, 下午 等）
     trimmed = trimmed.replace(/\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2}/g, ''); // 日期
     trimmed = trimmed.replace(/\d{1,2}:\d{2}/g, ''); // 时间
     trimmed = trimmed.replace(/(上午|下午|早上|晚上|中午)/g, ''); // 时段发言
     trimmed = trimmed.trim();
     if (!trimmed) continue;
+    cleanedLines.push(correctTypo(trimmed));
+  }
 
-    // 去掉银行名（无论是开头还是结尾）
-    let textToParse = trimmed;
-    if (bankName && trimmed.includes(bankName)) {
-      textToParse = trimmed.replace(bankName, '').trim();
-    } else {
-      // 也尝试去掉简称
-      const bankShortNames: Record<string, string> = {
-        '交通银行': '交通', '工商银行': '工行', '建设银行': '建行',
-        '农业银行': '农行', '中国银行': '中行', '招商银行': '招行', '邮储银行': '邮储'
-      };
-      const shortName = bankShortNames[bankName];
-      if (shortName && trimmed.includes(shortName)) {
-        textToParse = trimmed.replace(shortName, '').trim();
-      }
+  const results = [];
+  let currentBank = ''; // 当前银行分组：遇到新银行名就切换，无银行名的行沿用上一银行
+
+  for (const corrected of cleanedLines) {
+    // 1) 识别本行银行名（整行匹配，行首/行中/行尾都能命中）
+    const detectedBank = findBank(corrected);
+
+    // 2) 本行归属银行：本行出现银行名则从此切换分组，否则沿用当前分组
+    const bank = detectedBank || currentBank;
+    if (detectedBank) currentBank = detectedBank;
+
+    // 3) 整段至今还没出现过银行名：退回旧逻辑（把行首文字当自定义银行）
+    if (!bank) {
+      const parsed = parseQuotation(corrected, defaultWeekday);
+      if (parsed) results.push(parsed);
+      continue;
     }
 
-    // 去掉 "-" 等无意义字符，只保留期限+收益率
+    // 4) 去掉本行自己的银行名，留下期限/收益率文本
+    let textToParse = corrected;
+    if (detectedBank) {
+      textToParse = corrected.replace(detectedBank, '').trim();
+    }
+    // 去掉 "-" 等无意义字符
     textToParse = textToParse.replace(/^-\s*|\s+-\s*$/g, '').trim();
-    // 过滤掉只有期限没有收益率的行（如 "1M -" 或只有 "1M"）
+    // 纯银行名头行 / 纯期限行（如 "1M -"）不产生报价
     const pureTenorPattern = /^(1M|3M|6M|9M|1Y|1m|3m|6m|9m|1y)\s*$/i;
     if (pureTenorPattern.test(textToParse)) continue;
     if (!textToParse) continue;
 
-    // 用正则同时匹配期限和收益率
+    // 5) 一次匹配多个「期限+收益率」对，如 "1Y 1.85 3M 1.80"
     const tenorYieldPattern = /(1M|3M|6M|9M|1Y|1m|3m|6m|9m|1y)\s*(\d+\.?\d*%?)/gi;
     let match;
     const foundQuotes: any[] = [];
@@ -459,13 +435,13 @@ export function parseQuotations(text: string, defaultWeekday: string = '周一')
       foundQuotes.push({ tenor, yieldRate });
     }
 
-    // 如果找到期限+收益率，生成报价
+    // 生成报价
     if (foundQuotes.length > 0) {
       for (const q of foundQuotes) {
         results.push({
-          bankName: bankName || '',
+          bankName: bank || '',
           rating: 'AAA',
-          category: getCategory(bankName || '', 'AAA'),
+          category: getCategory(bank || '', 'AAA'),
           tenor: q.tenor,
           yieldRate: q.yieldRate,
           volume: '',
@@ -473,13 +449,15 @@ export function parseQuotations(text: string, defaultWeekday: string = '周一')
         });
       }
     } else {
-      // 如果没找到，用原来的方式解析整行
-      const parsed = parseQuotation(trimmed, defaultWeekday);
+      // 只含评级/星期等说明性文字（无数字）的行，跳过，不产生空报价
+      if (!/\d/.test(textToParse)) continue;
+      // 没有期限+收益率对时，用整行解析（可能只有收益率）
+      const parsed = parseQuotation(corrected, defaultWeekday);
       if (parsed) {
         results.push({
           ...parsed,
-          bankName: bankName || parsed.bankName,
-          category: getCategory(bankName || parsed.bankName, parsed.rating)
+          bankName: bank || parsed.bankName,
+          category: getCategory(bank || parsed.bankName, parsed.rating)
         });
       }
     }

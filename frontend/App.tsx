@@ -22,7 +22,7 @@ import {
 } from './services/api';
 import html2canvas from 'html2canvas';
 
-const APP_VERSION = '20260516'; // 版本号：YYYYMMDD 格式
+const APP_VERSION = '20260914'; // 版本号：YYYYMMDD 格式
 
 const App: React.FC = () => {
   // 视图模式：'quote' = 报价系统，'data' = 数据支持
@@ -61,6 +61,12 @@ const App: React.FC = () => {
 
   // 编辑中的收益率值（本地状态）
   const [editingYieldRate, setEditingYieldRate] = useState<string>('');
+  // 编辑中的字段值（双击编辑时使用本地状态，blur 时才提交）
+  const [editingFieldValues, setEditingFieldValues] = useState<Record<string, string>>({});
+  const getEditValue = (itemId: string, fieldKey: string, actualValue: string) =>
+    editingId === itemId && editingFieldValues[`${itemId}-${fieldKey}`] !== undefined
+      ? editingFieldValues[`${itemId}-${fieldKey}`]
+      : actualValue;
 
   // 同步到期日面板折叠状态
   const [isMaturityPanelCollapsed, setIsMaturityPanelCollapsed] = useState(false);
@@ -236,11 +242,12 @@ const App: React.FC = () => {
   };
 
   const handleConfirmAdd = async () => {
-    const updatedQuotes = [...allQuotes];
-    let skippedCount = 0;
-
     // 推入历史记录
     pushHistory(allQuotes);
+
+    const added: Quotation[] = [];
+    const updated: Quotation[] = [];
+    let skippedCount = 0;
 
     for (const newPart of recognizedQuotes) {
       // 跳过没有银行名或没有收益率的项
@@ -255,7 +262,13 @@ const App: React.FC = () => {
 
       if (isNaN(newRateVal)) continue;
 
-      const existingIdx = updatedQuotes.findIndex(q =>
+      // 在 allQuotes 中查找已存在的记录（用 updated 数组做批内去重）
+      const existingInBatch = [...added, ...updated];
+      const existingAll = [...allQuotes];
+      const existingQuote = existingAll.find(q =>
+        q.bankName === newPart.bankName && q.tenor === newPart.tenor
+      );
+      const alreadyAdded = existingInBatch.find(q =>
         q.bankName === newPart.bankName && q.tenor === newPart.tenor
       );
 
@@ -272,26 +285,30 @@ const App: React.FC = () => {
       }
       let finalYield = `${formattedRate}%`;
 
-      if (existingIdx > -1) {
-        const oldRateVal = parseFloat(updatedQuotes[existingIdx].yieldRate.replace(/[^\d.]/g, ''));
+      if (existingQuote && !alreadyAdded) {
+        // 更新已存在的报价
+        const oldRateVal = parseFloat(existingQuote.yieldRate.replace(/[^\d.]/g, ''));
         if (!isNaN(oldRateVal)) {
           if (newRateVal > oldRateVal) finalYield += '↑';
           else if (newRateVal < oldRateVal) finalYield += '↓';
         }
 
-        updatedQuotes[existingIdx] = {
-          ...updatedQuotes[existingIdx],
+        const updatedQuoteData = {
+          ...existingQuote,
           ...newPart,
           yieldRate: finalYield,
-          maturityDate: mat?.date || updatedQuotes[existingIdx].maturityDate,
-          maturityWeekday: mat?.weekday || updatedQuotes[existingIdx].maturityWeekday,
+          maturityDate: mat?.date || existingQuote.maturityDate,
+          maturityWeekday: mat?.weekday || existingQuote.maturityWeekday,
         } as Quotation;
 
-        // 更新到后端
-        const updated = await updateQuotationApi(updatedQuotes[existingIdx].id, updatedQuotes[existingIdx]);
-        // 广播给其他用户
-        emitQuotationUpdate(updated);
-      } else {
+        try {
+          const saved = await updateQuotationApi(existingQuote.id, updatedQuoteData);
+          updated.push(saved);
+        } catch (err) {
+          console.error('更新报价失败:', err);
+        }
+      } else if (!existingQuote && !alreadyAdded) {
+        // 全新的报价
         const newQuote = {
           ...newPart,
           id: Math.random().toString(36).substr(2, 9),
@@ -304,19 +321,35 @@ const App: React.FC = () => {
         } as Quotation;
 
         try {
-          // 保存到后端
           const saved = await addQuotation(newQuote);
-          // 广播给其他用户
-          emitQuotationAdd(saved);
-          updatedQuotes.push(saved);
+          added.push(saved);
         } catch (err) {
           console.error('保存报价失败:', err);
           alert('保存报价失败: ' + err);
         }
+      } else {
+        // 批内重复（same bankName+tenor in same batch）— 跳过
+        skippedCount++;
       }
     }
 
-    setAllQuotes(updatedQuotes);
+    // 单次功能性 state 合并（不丢失 WebSocket 回音带来的并发修改）
+    setAllQuotes(prev => {
+      const result = [...prev];
+      for (const q of added) {
+        if (!result.some(r => r.id === q.id)) result.push(q);
+      }
+      for (const q of updated) {
+        const idx = result.findIndex(r => r.id === q.id);
+        if (idx > -1) result[idx] = q;
+      }
+      return result;
+    });
+
+    // state 更新后再广播 WebSocket，避免回音竞争条件
+    for (const q of added) emitQuotationAdd(q);
+    for (const q of updated) emitQuotationUpdate(q);
+
     setRecognizedQuotes([]);
     setInputText('');
 
@@ -375,7 +408,7 @@ const App: React.FC = () => {
     }
 
     // 先本地更新
-    setAllQuotes(prev => prev.map(q => q.id === id ? { ...q, [field]: finalValue } : q));
+    setAllQuotes(prev => prev.map(q => q.id === id ? { ...q, [field]: finalValue, updatedAt: Date.now() } : q));
 
     // 发送到后端
     try {
@@ -679,6 +712,16 @@ const App: React.FC = () => {
     setTimeout(() => setCopyFeedback(false), 2000);
   };
 
+  // 格式化收益率：去掉末尾0，最少保留2位小数
+  // 例：1.485 → 1.485, 1.490 → 1.49, 1.100 → 1.10, 1.000 → 1.00
+  const formatYieldRate = (value: number) => {
+    const str = value.toFixed(4);
+    const [intPart, decPart] = str.split('.');
+    let trimmed = decPart.replace(/0+$/, '');
+    if (trimmed.length < 2) trimmed = trimmed.padEnd(2, '0');
+    return intPart + '.' + trimmed;
+  };
+
   // 批量调整选中报价的收益率（±0.5bp）
   const handleAdjustYield = (adjustment: number) => {
     if (selectedQuotes.size === 0) {
@@ -704,13 +747,11 @@ const App: React.FC = () => {
       const newYield = currentYield + adjustment;
       if (newYield < 0) return q; // 不允许负收益率
 
-      // 格式化：最多 4 位小数，至少 2 位
-      let formatted = newYield.toFixed(4).replace(/(\.\d{2,})0+$/, '$1');
-      if (!formatted.includes('.')) formatted += '.00';
-      else if (formatted.split('.')[1].length < 2) formatted = newYield.toFixed(2);
+      // 格式化收益率
+      let formatted = formatYieldRate(newYield);
 
-      // 添加方向符号
-      return { ...q, yieldRate: formatted + directionSymbol };
+      // 添加方向符号 + 更新时间
+      return { ...q, yieldRate: formatted + directionSymbol, updatedAt: Date.now() };
     }));
 
     // 同步更新后端
@@ -722,12 +763,14 @@ const App: React.FC = () => {
       const newYield = currentYield + adjustment;
       if (newYield < 0) return;
 
-      let formatted = newYield.toFixed(4).replace(/(\.\d{2,})0+$/, '$1');
-      if (!formatted.includes('.')) formatted += '.00';
-      else if (formatted.split('.')[1].length < 2) formatted = newYield.toFixed(2);
+      let formatted = formatYieldRate(newYield);
 
-      await updateQuotationApi(id, { yieldRate: formatted + directionSymbol });
-      emitQuotationUpdate({ ...quote, yieldRate: formatted + directionSymbol });
+      try {
+        const updated = await updateQuotationApi(id, { yieldRate: formatted + directionSymbol });
+        emitQuotationUpdate(updated);
+      } catch (e) {
+        console.error('批量调整失败:', e);
+      }
     });
 
     // 不清空选中，允许连续调整
@@ -1821,14 +1864,23 @@ const App: React.FC = () => {
                         <span className="text-[8px] text-slate-400 font-mono w-14 shrink-0">{new Date(item.updatedAt || item.createdAt || Date.now()).toLocaleTimeString('zh-CN', {hour12:false, hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>
                         <input
                           className="w-20 font-bold bg-transparent border-none focus:bg-white outline-none p-0 text-slate-900 text-[10px] shrink-0"
-                          value={item.bankName}
+                          value={getEditValue(item.id, 'bankName', item.bankName)}
                           onDoubleClick={(e) => {
                             e.stopPropagation();
                             setEditingId(item.id);
                             (e.target as HTMLInputElement).focus();
                           }}
-                          onBlur={() => setEditingId(null)}
-                          onChange={e => handleUpdateQuote(item.id, 'bankName', e.target.value)}
+                          onBlur={() => {
+                            const val = editingFieldValues[`${item.id}-bankName`];
+                            if (val !== undefined && val !== item.bankName) {
+                              handleUpdateQuote(item.id, 'bankName', val);
+                            }
+                            setEditingFieldValues(prev => { const n={...prev}; delete n[`${item.id}-bankName`]; return n; });
+                            setEditingId(null);
+                          }}
+                          onChange={e => {
+                            setEditingFieldValues(prev => ({ ...prev, [`${item.id}-bankName`]: e.target.value }));
+                          }}
                           data-bank-name-list={item.id}
                         />
                         <select
@@ -1862,8 +1914,8 @@ const App: React.FC = () => {
                           <option value="AA+">AA+</option>
                           <option value="AA-">AA-</option>
                         </select>
-                        <input className="w-5 text-slate-400 text-[8px] bg-transparent shrink-0" value={item.weekday} onDoubleClick={(e) => { e.stopPropagation(); setEditingId(item.id); (e.target as HTMLInputElement).focus(); }} onBlur={() => setEditingId(null)} onChange={e => handleUpdateQuote(item.id, 'weekday', e.target.value)} />
-                        <input className="w-10 text-slate-400 text-[8px] bg-transparent shrink-0" value={item.tenor} onDoubleClick={(e) => { e.stopPropagation(); setEditingId(item.id); (e.target as HTMLInputElement).focus(); }} onBlur={() => setEditingId(null)} onChange={e => handleUpdateQuote(item.id, 'tenor', e.target.value)} />
+                        <input className="w-5 text-slate-400 text-[8px] bg-transparent shrink-0" value={getEditValue(item.id, 'weekday', item.weekday)} onDoubleClick={(e) => { e.stopPropagation(); setEditingId(item.id); (e.target as HTMLInputElement).focus(); }} onBlur={() => { const v=editingFieldValues[`${item.id}-weekday`]; if(v!==undefined && v!==item.weekday) handleUpdateQuote(item.id,'weekday',v); setEditingFieldValues(p=>{const n={...p}; delete n[`${item.id}-weekday`]; return n;}); setEditingId(null); }} onChange={e => setEditingFieldValues(p=>({...p,[`${item.id}-weekday`]:e.target.value}))} />
+                        <input className="w-10 text-slate-400 text-[8px] bg-transparent shrink-0" value={getEditValue(item.id, 'tenor', item.tenor)} onDoubleClick={(e) => { e.stopPropagation(); setEditingId(item.id); (e.target as HTMLInputElement).focus(); }} onBlur={() => { const v=editingFieldValues[`${item.id}-tenor`]; if(v!==undefined && v!==item.tenor) handleUpdateQuote(item.id,'tenor',v); setEditingFieldValues(p=>{const n={...p}; delete n[`${item.id}-tenor`]; return n;}); setEditingId(null); }} onChange={e => setEditingFieldValues(p=>({...p,[`${item.id}-tenor`]:e.target.value}))} />
                         <input
                           className={`w-14 font-bold text-right outline-none bg-transparent text-[10px] shrink-0 ${item.yieldRate.includes('↑') ? 'text-red-600' : item.yieldRate.includes('↓') ? 'text-emerald-600' : 'text-blue-600'}`}
                           value={editingId === item.id ? editingYieldRate : item.yieldRate.replace(/%|↑|↓/g, '')}
@@ -1911,13 +1963,31 @@ const App: React.FC = () => {
                         />
                         <input
                           className="w-14 text-slate-400 text-[8px] text-center bg-transparent shrink-0"
-                          value={item.volume ? item.volume.replace(/亿 | 元/g, '') : ''}
+                          value={getEditValue(item.id, 'volume', item.volume ? item.volume.replace(/亿|元/g, '') : '')}
                           placeholder="量"
                           onDoubleClick={(e) => { e.stopPropagation(); setEditingId(item.id); (e.target as HTMLInputElement).focus(); }}
-                          onBlur={() => setEditingId(null)}
+                          onBlur={() => {
+                            const v = editingFieldValues[`${item.id}-volume`];
+                            if (v !== undefined) {
+                              const val = v.replace(/[^0-9.]/g, '');
+                              if (val && val !== (item.volume ? item.volume.replace(/亿|元/g, '') : '')) {
+                                handleUpdateQuote(item.id, 'volume', val ? val + '亿元' : '');
+                              }
+                            }
+                            setEditingFieldValues(p=>{const n={...p}; delete n[`${item.id}-volume`]; return n;});
+                            setEditingId(null);
+                          }}
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') {
                               e.stopPropagation();
+                              const v = editingFieldValues[`${item.id}-volume`];
+                              if (v !== undefined) {
+                                const val = v.replace(/[^0-9.]/g, '');
+                                if (val && val !== (item.volume ? item.volume.replace(/亿|元/g, '') : '')) {
+                                  handleUpdateQuote(item.id, 'volume', val ? val + '亿元' : '');
+                                }
+                              }
+                              setEditingFieldValues(p=>{const n={...p}; delete n[`${item.id}-volume`]; return n;});
                               setEditingId(null);
                               toggleSelect(item.id);
                               const text = `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}${item.volume ? ' ' + item.volume : ''}${item.remarks ? ' ' + item.remarks : ''}`.trim();
@@ -1927,19 +1997,30 @@ const App: React.FC = () => {
                             }
                           }}
                           onChange={e => {
-                            const val = e.target.value.replace(/[^0-9.]/g, '');
-                            handleUpdateQuote(item.id, 'volume', val ? val + '亿元' : '');
+                            setEditingFieldValues(p=>({...p,[`${item.id}-volume`]:e.target.value}));
                           }}
                         />
                         <input
                           className="w-20 text-slate-400 italic text-[8px] truncate bg-transparent shrink-0"
-                          value={item.remarks || ''}
+                          value={getEditValue(item.id, 'remarks', item.remarks || '')}
                           placeholder="备注"
                           onDoubleClick={(e) => { e.stopPropagation(); setEditingId(item.id); (e.target as HTMLInputElement).focus(); }}
-                          onBlur={() => setEditingId(null)}
+                          onBlur={() => {
+                            const v = editingFieldValues[`${item.id}-remarks`];
+                            if (v !== undefined && v !== (item.remarks || '')) {
+                              handleUpdateQuote(item.id, 'remarks', v);
+                            }
+                            setEditingFieldValues(p=>{const n={...p}; delete n[`${item.id}-remarks`]; return n;});
+                            setEditingId(null);
+                          }}
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') {
                               e.stopPropagation();
+                              const v = editingFieldValues[`${item.id}-remarks`];
+                              if (v !== undefined && v !== (item.remarks || '')) {
+                                handleUpdateQuote(item.id, 'remarks', v);
+                              }
+                              setEditingFieldValues(p=>{const n={...p}; delete n[`${item.id}-remarks`]; return n;});
                               setEditingId(null);
                               toggleSelect(item.id);
                               const text = `${item.bankName} ${item.rating} ${item.weekday} ${item.tenor} ${item.yieldRate}${item.volume ? ' ' + item.volume : ''}${item.remarks ? ' ' + item.remarks : ''}`.trim();
@@ -1948,7 +2029,9 @@ const App: React.FC = () => {
                               setTimeout(() => setCopySuccessMsg(''), 1500);
                             }
                           }}
-                          onChange={e => handleUpdateQuote(item.id, 'remarks', e.target.value)}
+                          onChange={e => {
+                            setEditingFieldValues(p=>({...p,[`${item.id}-remarks`]:e.target.value}));
+                          }}
                         />
                         <button
                           onClick={(e) => {

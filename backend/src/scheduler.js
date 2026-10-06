@@ -1,5 +1,6 @@
 import cron from 'node-cron';
-import { saveDatabase, syncIssuanceData } from './database.js';
+import { saveDatabase, syncIssuanceData, getNcdIssuanceState } from './database.js';
+import { syncNcdDaily, backfillNcd, syncBankRatings } from './dm.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
@@ -8,7 +9,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /**
  * 发行量统计定时任务
- * 每个工作日 17:20 自动更新
+ * 每个工作日 17:35 自动更新（cd_quote 侧 17:00 / 17:30 自动爬取完成后同步）
  *
  * 注意：实际数据来自 auto-quote 系统的爬虫数据
  * 本模块负责从 auto-quote 数据库同步数据并统计
@@ -80,11 +81,11 @@ async function syncFromAutoQuote() {
     const fileBuffer = fs.readFileSync(autoQuoteDbPath);
     const autoQuoteDb = new SQL.Database(fileBuffer);
 
-    // 查询 temp_quotes 表
-    const results = autoQuoteDb.exec('SELECT * FROM temp_quotes');
+    // 查询 daily_prices 表（包含完整的发行量历史数据）
+    const results = autoQuoteDb.exec('SELECT bank_name, issue_name, volume, tenor, ref_yield, issue_date FROM daily_prices WHERE issue_date IS NOT NULL AND issue_date != "" ORDER BY issue_date');
 
     if (!results || results.length === 0) {
-      console.log('[定时任务] auto-quote 数据库中没有 temp_quotes 表');
+      console.log('[定时任务] auto-quote 数据库中没有 daily_prices 表');
       return { success: false, reason: '没有数据' };
     }
 
@@ -114,9 +115,9 @@ async function syncFromAutoQuote() {
 export function initScheduler() {
   console.log('[定时任务] 初始化发行量统计任务...');
 
-  // 每个工作日 17:20 执行
+  // 每个工作日 17:35 执行（cd_quote 17:00/17:30 两轮自动爬取之后）
   // cron 表达式：minute hour day-of-month month day-of-week
-  const job = cron.schedule('20 17 * * 1-5', async () => {
+  const job = cron.schedule('35 17 * * 1-5', async () => {
     const today = new Date();
     const dateStr = today.toISOString().slice(0, 10);
 
@@ -138,7 +139,49 @@ export function initScheduler() {
     timezone: 'Asia/Shanghai'
   });
 
-  console.log('[定时任务] 发行量统计任务已启动（每个工作日 17:20）');
+  console.log('[定时任务] 发行量统计任务已启动（每个工作日 17:35）');
+
+  // 同业存单到期量：每日增量。每个工作日 18:10 回看最近 7 天的发行记录
+  // （覆写修正「发行中」存单上市/取消后的金额与状态）。约 7 次调用/日，成本可忽略。
+  // 抓完后顺带补抓新出现银行的主体评级（只查未评级的，首轮之后基本 0 次）。
+  cron.schedule('10 18 * * 1-5', async () => {
+    try {
+      console.log('[定时任务] 开始同步存单发行记录（最近 7 天）...');
+      const r = await syncNcdDaily();
+      console.log(`[定时任务] 存单同步完成，调用 ${r.calls} 次 / 入库 ${r.total} 条`);
+    } catch (e) {
+      console.error('[定时任务] 存单同步失败:', e.message);
+    }
+    try {
+      const rt = await syncBankRatings({ onProgress: p => console.log(`[评级] ${p.done}/${p.total} 家（${p.calls} 次调用）`) });
+      if (rt.banks > 0) console.log(`[定时任务] 存单评级同步完成，新增 ${rt.updated} 家 / 调用 ${rt.calls} 次`);
+    } catch (e) {
+      console.error('[定时任务] 存单评级同步失败:', e.message);
+    }
+  }, { scheduled: true, timezone: 'Asia/Shanghai' });
+
+  console.log('[定时任务] 存单到期量每日同步任务已启动（工作日 18:10）');
+
+  // 首次启动且库为空时，后台回补 13 个月发行记录（约 400 次调用，几分钟），随后补抓评级
+  try {
+    if (getNcdIssuanceState().count === 0) {
+      console.log('[定时任务] 存单库为空，后台开始回补 13 个月发行记录...');
+      backfillNcd(13, p => console.log(`[回补] ${p.day} 已调用 ${p.calls} 次 / 入库 ${p.total} 条`))
+        .then(r => {
+          console.log('[定时任务] 存单回补完成:', JSON.stringify(r.state));
+          return syncBankRatings({ onProgress: p => console.log(`[评级] ${p.done}/${p.total} 家（${p.calls} 次调用）`) });
+        })
+        .then(rt => console.log(`[定时任务] 评级补抓完成：${rt.banks} 家 / ${rt.calls} 次调用`))
+        .catch(e => console.error('[定时任务] 存单回补/评级失败:', e.message));
+    } else {
+      // 库已有数据：回填 bucket/rating，并补抓新出现银行的评级
+      syncBankRatings()
+        .then(rt => { if (rt.banks > 0) console.log(`[定时任务] 启动补抓评级：${rt.banks} 家 / ${rt.calls} 次调用`); })
+        .catch(e => console.error('[定时任务] 启动评级同步失败:', e.message));
+    }
+  } catch (e) {
+    console.error('[定时任务] 回补检查失败:', e.message);
+  }
 
   // 开发模式：立即执行一次测试
   if (process.env.NODE_ENV !== 'production') {

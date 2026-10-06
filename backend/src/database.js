@@ -91,10 +91,18 @@ async function initDatabase() {
       file_type TEXT NOT NULL,
       file_path TEXT,
       file_data BLOB,
+      data_date TEXT,
       uploaded_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
       FOREIGN KEY (section_id) REFERENCES data_sections(id) ON DELETE CASCADE
     )
   `);
+
+  // 迁移：为已存在的数据文件表添加 data_date 字段
+  try {
+    db.run('ALTER TABLE data_files ADD COLUMN data_date TEXT');
+  } catch (_e) {
+    // 列已存在则忽略
+  }
 
   // 分析数据表（结构化数据）
   db.run(`
@@ -121,10 +129,48 @@ async function initDatabase() {
     )
   `);
 
+  // 同业存单发行记录（从 DM 抓取，用于反推每日到期量及按银行拆分）
+  // 存单到期日 = 起息日 + 期限，故按到期日聚合发行记录即得到每日到期明细
+  // rating / bucket 为派生字段：rating 来自 DM 主体评级，bucket 为「大行国股」或评级
+  db.run(`
+    CREATE TABLE IF NOT EXISTS ncd_issuance (
+      security_id TEXT PRIMARY KEY,
+      issuer_name TEXT,
+      sec_name TEXT,
+      tenor TEXT,
+      amount REAL,
+      ref_yield REAL,
+      issue_date TEXT,
+      start_accrue_date TEXT,
+      maturity_date TEXT,
+      issue_status INTEGER,
+      synced_at INTEGER
+    )
+  `);
+
+  // 银行主体评级（DM com_rating），按银行名缓存
+  db.run(`
+    CREATE TABLE IF NOT EXISTS bank_rating (
+      bank_name TEXT PRIMARY KEY,
+      rating TEXT,
+      rating_date TEXT,
+      institution TEXT,
+      updated_at INTEGER
+    )
+  `);
+
+  // 迁移：给 ncd_issuance 补 rating / bucket 列（老库没有）
+  for (const col of ['rating TEXT', 'bucket TEXT']) {
+    try { db.run(`ALTER TABLE ncd_issuance ADD COLUMN ${col}`); } catch (e) { /* 已存在 */ }
+  }
+
   // 创建索引以提高查询性能
   try {
     db.run(`CREATE INDEX IF NOT EXISTS idx_issue_date ON temp_quotes(issue_date)`);
     db.run(`CREATE INDEX IF NOT EXISTS idx_bank_name ON temp_quotes(bank_name)`);
+    db.run(`CREATE INDEX IF NOT EXISTS idx_ncd_maturity ON ncd_issuance(maturity_date)`);
+    db.run(`CREATE INDEX IF NOT EXISTS idx_ncd_issue ON ncd_issuance(issue_date)`);
+    db.run(`CREATE INDEX IF NOT EXISTS idx_ncd_bucket ON ncd_issuance(bucket)`);
   } catch (e) {
     console.log('[数据库] 索引创建跳过');
   }
@@ -134,6 +180,7 @@ async function initDatabase() {
     { id: 'maturity_date', name: '到期日', is_custom: 0 },
     { id: 'issuance_volume', name: '发行量', is_custom: 0 },
     { id: 'maturity_volume', name: '到期量', is_custom: 0 },
+    { id: 'ncd_maturity', name: '存单到期量', is_custom: 0 },
     { id: 'remaining_quota', name: '存单剩余额度', is_custom: 0 },
     { id: 'custom', name: '自定义板块', is_custom: 1 }
   ];
@@ -340,8 +387,8 @@ function getSectionFiles(sectionId) {
 function addFile(file) {
   const now = Date.now();
   db.run(`
-    INSERT INTO data_files (id, section_id, filename, file_type, file_path, file_data, uploaded_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO data_files (id, section_id, filename, file_type, file_path, file_data, data_date, uploaded_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `, [
     file.id,
     file.section_id,
@@ -349,6 +396,7 @@ function addFile(file) {
     file.file_type,
     file.file_path || '',
     file.file_data || null,
+    file.data_date || null,
     now
   ]);
   saveDatabase();
@@ -438,6 +486,271 @@ function getAvailableIssueDates() {
   return results;
 }
 
+// ========== 同业存单到期量（DM 抓取） ==========
+
+// 写入/更新同业存单发行记录（按 security_id 去重）
+function upsertNcdIssuance(rows) {
+  if (!rows || rows.length === 0) return { count: 0 };
+  const stmt = db.prepare(`
+    INSERT OR REPLACE INTO ncd_issuance
+      (security_id, issuer_name, sec_name, tenor, amount, ref_yield,
+       issue_date, start_accrue_date, maturity_date, issue_status, synced_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const now = Date.now();
+  let count = 0;
+  for (const r of rows) {
+    if (!r.security_id) continue;
+    stmt.run([
+      r.security_id, r.issuer_name ?? null, r.sec_name ?? null, r.tenor ?? null,
+      r.amount ?? null, r.ref_yield ?? null, r.issue_date ?? null,
+      r.start_accrue_date ?? null, r.maturity_date ?? null,
+      r.issue_status ?? null, now
+    ]);
+    count++;
+  }
+  stmt.free();
+  saveDatabase();
+  return { count };
+}
+
+// 已入库的发行记录数与发行日范围（用于增量判断）
+function getNcdIssuanceState() {
+  const stmt = db.prepare(`
+    SELECT COUNT(*) as count,
+           MIN(issue_date) as min_issue_date,
+           MAX(issue_date) as max_issue_date
+    FROM ncd_issuance
+  `);
+  let row = { count: 0, min_issue_date: null, max_issue_date: null };
+  if (stmt.step()) row = stmt.getAsObject();
+  stmt.free();
+  return row;
+}
+
+// ===== 类别（bucket）=====
+// 「大行国股」= 6 家国有大行 + 12 家股份制银行，是固定名单，按银行名判定即可（既不依赖外部数据、也不会过时）
+// 其余银行按 DM 主体评级归入 AAA / AA+ / … ；无评级归「未评级」
+const BIG_KEYWORDS = [
+  '工商银行', '农业银行', '中国银行', '建设银行', '交通银行', '邮储银行', '邮政储蓄',
+  '兴业银行', '浦发银行', '民生银行', '中信银行', '光大银行', '华夏银行',
+  '浙商银行', '渤海银行', '恒丰银行', '平安银行', '招商银行', '广发银行',
+];
+function isBigBank(name) {
+  if (!name) return false;
+  return BIG_KEYWORDS.some(k => name.includes(k));
+}
+// 前端可筛的评级桶（与用户确认的筛选项一致）；DM 里偶有 BBB+、数字等非标准值，统一归「其他」
+const RATING_BUCKETS = ['AAA', 'AA+', 'AA', 'AA-', 'A+', 'A', 'A-'];
+function ratingBucket(rating) {
+  if (!rating) return '未评级';
+  return RATING_BUCKETS.includes(rating) ? rating : '其他';
+}
+// 用 includes 而非前缀匹配，避免把「中国民生银行」「中国光大银行」误判成国有大行
+
+// 写入/更新银行主体评级
+function upsertBankRatings(rows) {
+  if (!rows || rows.length === 0) return { count: 0 };
+  const stmt = db.prepare(`
+    INSERT OR REPLACE INTO bank_rating (bank_name, rating, rating_date, institution, updated_at)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  const now = Date.now();
+  let count = 0;
+  for (const r of rows) {
+    if (!r.bank_name) continue;
+    stmt.run([r.bank_name, r.rating ?? null, r.rating_date ?? null, r.institution ?? null, now]);
+    count++;
+  }
+  stmt.free();
+  saveDatabase();
+  return { count };
+}
+
+// 还没有评级的银行（只查这些，避免重复调用）
+function getBanksNeedingRating() {
+  const stmt = db.prepare(`
+    SELECT DISTINCT i.issuer_name
+    FROM ncd_issuance i
+    LEFT JOIN bank_rating r ON r.bank_name = i.issuer_name
+    WHERE i.issuer_name IS NOT NULL AND r.bank_name IS NULL
+  `);
+  const out = [];
+  while (stmt.step()) out.push(stmt.getAsObject().issuer_name);
+  stmt.free();
+  return out;
+}
+
+// 全部发过存单的银行（强制重抓评级时用）
+function getAllNcdIssuers() {
+  const stmt = db.prepare(`SELECT DISTINCT issuer_name FROM ncd_issuance WHERE issuer_name IS NOT NULL`);
+  const out = [];
+  while (stmt.step()) out.push(stmt.getAsObject().issuer_name);
+  stmt.free();
+  return out;
+}
+
+// 依据 银行名 + 评级 回填 ncd_issuance 的 bucket / rating
+function refreshBankMeta() {
+  const stmt = db.prepare(`SELECT DISTINCT issuer_name FROM ncd_issuance WHERE issuer_name IS NOT NULL`);
+  const names = [];
+  while (stmt.step()) names.push(stmt.getAsObject().issuer_name);
+  stmt.free();
+
+  const upd = db.prepare(`UPDATE ncd_issuance SET bucket = ?, rating = ? WHERE issuer_name = ?`);
+  const getR = db.prepare(`SELECT rating FROM bank_rating WHERE bank_name = ?`);
+  let n = 0;
+  for (const name of names) {
+    let rating = null;
+    getR.bind([name]);
+    if (getR.step()) rating = getR.getAsObject().rating;
+    getR.reset();
+    const bucket = isBigBank(name) ? '大行国股' : ratingBucket(rating);
+    upd.run([bucket, rating, name]);
+    n++;
+  }
+  getR.free();
+  upd.free();
+  saveDatabase();
+  return { banks: n };
+}
+
+// 指定到期日的明细 + 按银行汇总 + 按期限汇总
+// 排除 issue_status=3（取消发行）——这些存单实际未发行，不计入到期量
+// 实测：不过滤为 1422.1 亿，过滤后 1413.1 亿，与 DM 官方统计一致
+const TENOR_ORDER = ['1M', '3M', '6M', '9M', '1Y'];
+function getNcdMaturityByDate(date, category) {
+  const stmt = db.prepare(`
+    SELECT issuer_name, sec_name, tenor, amount, ref_yield, security_id,
+           rating, COALESCE(bucket, '未评级') as bucket
+    FROM ncd_issuance
+    WHERE maturity_date = ? AND (issue_status IS NULL OR issue_status != 3)
+    ORDER BY amount DESC
+  `);
+  stmt.bind([date]);
+  let records = [];
+  while (stmt.step()) records.push(stmt.getAsObject());
+  stmt.free();
+
+  if (category) records = records.filter(r => r.bucket === category);
+
+  const bankMap = {}, tenorMap = {};
+  let total = 0;
+  for (const r of records) {
+    const amt = r.amount || 0;
+    total += amt;
+    const bank = r.issuer_name || r.sec_name || '未知';
+    if (!bankMap[bank]) bankMap[bank] = { bank_name: bank, bucket: r.bucket, rating: r.rating, amount: 0, count: 0 };
+    bankMap[bank].amount += amt;
+    bankMap[bank].count += 1;
+    const t = r.tenor || '其他';
+    if (!tenorMap[t]) tenorMap[t] = { tenor: t, amount: 0, count: 0 };
+    tenorMap[t].amount += amt;
+    tenorMap[t].count += 1;
+  }
+  const banks = Object.values(bankMap)
+    .map(b => ({ ...b, amount: +b.amount.toFixed(2) }))
+    .sort((a, b) => b.amount - a.amount);
+  const byTenor = Object.values(tenorMap)
+    .map(t => ({ ...t, amount: +t.amount.toFixed(2) }))
+    .sort((a, b) => {
+      const ia = TENOR_ORDER.indexOf(a.tenor), ib = TENOR_ORDER.indexOf(b.tenor);
+      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+    });
+  return {
+    date,
+    total_amount: +total.toFixed(2),
+    total_count: records.length,
+    bank_count: banks.length,
+    by_tenor: byTenor,
+    banks,
+    records,
+  };
+}
+
+// 到期量按日汇总（区间），可按类别 / 银行筛选
+// bank 用 instr() 做字面量模糊匹配（而非 LIKE），避免用户输入 % _ 被当成通配符
+function getNcdMaturitySummary(startDate, endDate, category, bank) {
+  const params = [startDate, endDate];
+  let sql = `
+    SELECT maturity_date as date,
+           SUM(amount) as total_amount,
+           COUNT(*) as total_count,
+           COUNT(DISTINCT issuer_name) as bank_count
+    FROM ncd_issuance
+    WHERE maturity_date >= ? AND maturity_date <= ?
+      AND (issue_status IS NULL OR issue_status != 3)`;
+  if (category) { sql += " AND COALESCE(bucket, '未评级') = ?"; params.push(category); }
+  if (bank) { sql += " AND instr(COALESCE(issuer_name, ''), ?) > 0"; params.push(bank); }
+  sql += ' GROUP BY maturity_date ORDER BY maturity_date';
+
+  const stmt = db.prepare(sql);
+  stmt.bind(params);
+  const results = [];
+  while (stmt.step()) {
+    const r = stmt.getAsObject();
+    r.total_amount = +(r.total_amount || 0).toFixed(2);
+    results.push(r);
+  }
+  stmt.free();
+  return results;
+}
+
+// 区间内按银行汇总（可按类别 / 银行筛选）
+function getNcdMaturityBankSummary(startDate, endDate, category, bank) {
+  const params = [startDate, endDate];
+  let sql = `
+    SELECT COALESCE(issuer_name, sec_name, '未知') as bank_name,
+           COALESCE(bucket, '未评级') as bucket,
+           SUM(amount) as amount,
+           COUNT(*) as count
+    FROM ncd_issuance
+    WHERE maturity_date >= ? AND maturity_date <= ?
+      AND (issue_status IS NULL OR issue_status != 3)`;
+  if (category) { sql += " AND COALESCE(bucket, '未评级') = ?"; params.push(category); }
+  if (bank) { sql += " AND instr(COALESCE(issuer_name, ''), ?) > 0"; params.push(bank); }
+  sql += ' GROUP BY bank_name ORDER BY amount DESC';
+
+  const stmt = db.prepare(sql);
+  stmt.bind(params);
+  const results = [];
+  while (stmt.step()) {
+    const r = stmt.getAsObject();
+    r.amount = +(r.amount || 0).toFixed(2);
+    results.push(r);
+  }
+  stmt.free();
+  return results;
+}
+
+// 各类别的存单数量/金额（用于前端筛选下拉的计数展示）
+function getNcdCategoryOptions() {
+  const stmt = db.prepare(`
+    SELECT COALESCE(bucket, '未评级') as bucket, COUNT(*) as count, ROUND(SUM(amount), 1) as amount
+    FROM ncd_issuance
+    WHERE issue_status IS NULL OR issue_status != 3
+    GROUP BY bucket
+  `);
+  const out = {};
+  while (stmt.step()) { const r = stmt.getAsObject(); out[r.bucket] = { count: r.count, amount: r.amount }; }
+  stmt.free();
+  return out;
+}
+
+// 有到期数据的日期列表
+function getNcdMaturityDates() {
+  const stmt = db.prepare(`
+    SELECT DISTINCT maturity_date as date
+    FROM ncd_issuance
+    WHERE maturity_date IS NOT NULL AND (issue_status IS NULL OR issue_status != 3)
+    ORDER BY maturity_date DESC
+  `);
+  const results = [];
+  while (stmt.step()) results.push(stmt.getAsObject().date);
+  stmt.free();
+  return results;
+}
+
 // 按银行统计发行量（指定日期范围内）
 function getIssuanceByBank(startDate, endDate) {
   const stmt = db.prepare(`
@@ -458,7 +771,106 @@ function getIssuanceByBank(startDate, endDate) {
   return results;
 }
 
-// 获取月度统计
+// 获取银行发行量对比（含环比变化%）
+function getIssuanceBankCompare(startDate, endDate) {
+  const current = getIssuanceByBank(startDate, endDate);
+
+  // 计算上一期（相同天数的前一周期）
+  const start = new Date(startDate + 'T00:00:00');
+  const end = new Date(endDate + 'T00:00:00');
+  const diffDays = Math.round((end - start) / 86400000);
+  const prevEnd = new Date(start.getTime() - 86400000);
+  const prevStart = new Date(prevEnd.getTime() - diffDays * 86400000);
+  const fmt = (d) => d.toISOString().slice(0, 10);
+
+  // 获取上一期数据
+  const previous = getIssuanceByBank(fmt(prevStart), fmt(prevEnd));
+  const prevMap = {};
+  for (const p of previous) {
+    prevMap[p.bank_name] = p.total_volume;
+  }
+
+  return {
+    banks: current.map(item => {
+      const prevVol = prevMap[item.bank_name] || 0;
+      const changePct = prevVol > 0
+        ? Math.round(((item.total_volume - prevVol) / prevVol) * 1000) / 10
+        : null;
+      return {
+        bank_name: item.bank_name,
+        count: item.count,
+        total_volume: item.total_volume,
+        prev_volume: prevVol,
+        change_pct: changePct
+      };
+    }),
+    prev_period: { start: fmt(prevStart), end: fmt(prevEnd) }
+  };
+}
+
+// 获取发行量矩阵数据（按银行 × 日期 × 期限）
+function getIssuanceMatrix(startDate, endDate) {
+  const stmt = db.prepare(`
+    SELECT bank_name, issue_date, tenor,
+           COUNT(*) as count,
+           SUM(CAST(REPLACE(REPLACE(volume, '亿元', ''), '亿', '') AS REAL) || 0) as total_volume
+    FROM temp_quotes
+    WHERE issue_date >= ? AND issue_date <= ?
+    GROUP BY bank_name, issue_date, tenor
+    ORDER BY bank_name, issue_date, tenor
+  `);
+  stmt.bind([startDate, endDate]);
+  const results = [];
+  while (stmt.step()) {
+    results.push(stmt.getAsObject());
+  }
+  stmt.free();
+
+  // 获取日期列表和银行列表
+  const stmtDates = db.prepare(`
+    SELECT DISTINCT issue_date as date FROM temp_quotes
+    WHERE issue_date >= ? AND issue_date <= ?
+    ORDER BY issue_date ASC
+  `);
+  stmtDates.bind([startDate, endDate]);
+  const dates = [];
+  while (stmtDates.step()) {
+    dates.push(stmtDates.getAsObject().date);
+  }
+  stmtDates.free();
+
+  const stmtBanks = db.prepare(`
+    SELECT bank_name, SUM(CAST(REPLACE(REPLACE(volume, '亿元', ''), '亿', '') AS REAL) || 0) as total
+    FROM temp_quotes
+    WHERE issue_date >= ? AND issue_date <= ?
+    GROUP BY bank_name
+    ORDER BY total DESC
+  `);
+  stmtBanks.bind([startDate, endDate]);
+  const banks = [];
+  while (stmtBanks.step()) {
+    const row = stmtBanks.getAsObject();
+    banks.push({ bank_name: row.bank_name, total: row.total });
+  }
+  stmtBanks.free();
+
+  // 获取所有期限列表
+  const stmtTenors = db.prepare(`
+    SELECT DISTINCT tenor FROM temp_quotes
+    WHERE issue_date >= ? AND issue_date <= ? AND tenor != ''
+    ORDER BY tenor
+  `);
+  stmtTenors.bind([startDate, endDate]);
+  const tenors = [];
+  while (stmtTenors.step()) {
+    tenors.push(stmtTenors.getAsObject().tenor);
+  }
+  stmtTenors.free();
+
+  return { dates, banks: banks.map(b => b.bank_name), tenors, data: results };
+}
+
+// 月度统计
 function getMonthlyStats(yearMonth) {
   const stmt = db.prepare(`
     SELECT bank_name,
@@ -480,8 +892,11 @@ function getMonthlyStats(yearMonth) {
 
 // 同步发行量数据（从 auto-quote 系统）
 function syncIssuanceData(quotes) {
-  // 清除旧数据
-  db.run('DELETE FROM temp_quotes');
+  // 只清除本次同步涉及日期的旧数据，保留手工录入的其他日期数据
+  const affectedDates = [...new Set(quotes.map(q => q.issue_date).filter(Boolean))];
+  for (const date of affectedDates) {
+    db.run('DELETE FROM temp_quotes WHERE issue_date = ?', [date]);
+  }
 
   // 插入新数据
   const stmt = db.prepare(`
@@ -502,6 +917,137 @@ function syncIssuanceData(quotes) {
 
   saveDatabase();
   return { success: true, count: quotes.length };
+}
+
+// 追加发行量数据（不覆盖已有数据，用于手动录入）
+function addIssuanceRecords(records) {
+  const stmt = db.prepare(`
+    INSERT INTO temp_quotes (bank_name, issue_name, volume, tenor, ref_yield, issue_date)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+
+  let count = 0;
+  for (const r of records) {
+    if (!r.bank_name || !r.issue_date) continue;
+    stmt.run([
+      r.bank_name,
+      r.issue_name || '',
+      r.volume || '',
+      r.tenor || '',
+      r.ref_yield || '',
+      r.issue_date
+    ]);
+    count++;
+  }
+
+  saveDatabase();
+  return { success: true, count };
+}
+
+// ========== 到期量统计操作（从 quotation 表获取）==========
+
+// 获取所有到期日期
+function getMaturityDates() {
+  const stmt = db.prepare(`
+    SELECT DISTINCT maturity_date as date
+    FROM quotations
+    WHERE maturity_date IS NOT NULL AND maturity_date != ''
+    ORDER BY maturity_date DESC
+  `);
+  const results = [];
+  while (stmt.step()) results.push(stmt.getAsObject());
+  stmt.free();
+  return results;
+}
+
+// 获取指定日期的到期明细
+function getMaturityByDate(date) {
+  const stmt = db.prepare(`
+    SELECT bank_name, tenor, yield_rate, volume
+    FROM quotations
+    WHERE maturity_date = ?
+    ORDER BY bank_name, tenor
+  `);
+  stmt.bind([date]);
+  const results = [];
+  while (stmt.step()) results.push(stmt.getAsObject());
+  stmt.free();
+  return results;
+}
+
+// 获取月度到期统计
+function getMonthlyMaturityStats(yearMonth) {
+  const monthPrefix = yearMonth.replace('-', '/');
+  const stmt = db.prepare(`
+    SELECT bank_name, COUNT(*) as count
+    FROM quotations
+    WHERE maturity_date LIKE ?
+    GROUP BY bank_name
+    ORDER BY count DESC
+  `);
+  stmt.bind([monthPrefix + '%']);
+  const results = [];
+  while (stmt.step()) results.push(stmt.getAsObject());
+  stmt.free();
+  return results;
+}
+
+// 获取到期量矩阵数据（按银行 × 日期）
+function getMaturityMatrix(startDate, endDate) {
+  const stmt = db.prepare(`
+    SELECT bank_name, maturity_date as issue_date, tenor,
+           COUNT(*) as count,
+           0 as total_volume
+    FROM quotations
+    WHERE maturity_date IS NOT NULL AND maturity_date != ''
+      AND maturity_date >= ? AND maturity_date <= ?
+    GROUP BY bank_name, maturity_date, tenor
+    ORDER BY bank_name, maturity_date, tenor
+  `);
+  stmt.bind([startDate, endDate]);
+  const results = [];
+  while (stmt.step()) results.push(stmt.getAsObject());
+  stmt.free();
+
+  // 获取日期列表
+  const stmtDates = db.prepare(`
+    SELECT DISTINCT maturity_date as date FROM quotations
+    WHERE maturity_date IS NOT NULL AND maturity_date != ''
+      AND maturity_date >= ? AND maturity_date <= ?
+    ORDER BY maturity_date ASC
+  `);
+  stmtDates.bind([startDate, endDate]);
+  const dates = [];
+  while (stmtDates.step()) dates.push(stmtDates.getAsObject().date);
+  stmtDates.free();
+
+  // 获取银行列表
+  const stmtBanks = db.prepare(`
+    SELECT bank_name, COUNT(*) as total
+    FROM quotations
+    WHERE maturity_date IS NOT NULL AND maturity_date != ''
+      AND maturity_date >= ? AND maturity_date <= ?
+    GROUP BY bank_name
+    ORDER BY total DESC
+  `);
+  stmtBanks.bind([startDate, endDate]);
+  const banks = [];
+  while (stmtBanks.step()) banks.push(stmtBanks.getAsObject().bank_name);
+  stmtBanks.free();
+
+  // 获取期限列表
+  const stmtTenors = db.prepare(`
+    SELECT DISTINCT tenor FROM quotations
+    WHERE maturity_date IS NOT NULL AND maturity_date != ''
+      AND maturity_date >= ? AND maturity_date <= ? AND tenor != ''
+    ORDER BY tenor
+  `);
+  stmtTenors.bind([startDate, endDate]);
+  const tenors = [];
+  while (stmtTenors.step()) tenors.push(stmtTenors.getAsObject().tenor);
+  stmtTenors.free();
+
+  return { dates, banks, tenors, data: results };
 }
 
 export {
@@ -532,6 +1078,27 @@ export {
   getIssuanceByDate,
   getAvailableIssueDates,
   getIssuanceByBank,
+  getIssuanceBankCompare,
   getMonthlyStats,
-  syncIssuanceData
+  syncIssuanceData,
+  getIssuanceMatrix,
+  addIssuanceRecords,
+  // 到期量统计
+  getMaturityDates,
+  getMaturityByDate,
+  getMonthlyMaturityStats,
+  getMaturityMatrix,
+  // 同业存单到期量（DM）
+  upsertNcdIssuance,
+  getNcdIssuanceState,
+  getNcdMaturityByDate,
+  getNcdMaturitySummary,
+  getNcdMaturityBankSummary,
+  getNcdMaturityDates,
+  // 银行主体评级 / 类别
+  upsertBankRatings,
+  getBanksNeedingRating,
+  getAllNcdIssuers,
+  refreshBankMeta,
+  getNcdCategoryOptions
 };

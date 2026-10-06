@@ -16,15 +16,16 @@ dotenv.config();
 const app = express();
 const httpServer = createServer(app);
 
-// 配置 CORS - 允许所有本地端口和服务器
-const corsOrigin = process.env.CORS_ORIGIN || '*';
+// 配置 CORS - 允许所有本地端口和服务器。CORS_ORIGIN 支持逗号分隔的多个来源
+// （本机 localhost 与 127.0.0.1 可能指向不同进程，两个都要放行）
+const corsOrigin = (process.env.CORS_ORIGIN || '*').split(',').map(s => s.trim()).filter(Boolean);
 app.use(cors({
-  origin: corsOrigin,
+  origin: corsOrigin.length === 1 && corsOrigin[0] === '*' ? '*' : corsOrigin,
   credentials: true
 }));
 
 // 中间件
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 // API 路由
 app.use('/api', apiRouter);

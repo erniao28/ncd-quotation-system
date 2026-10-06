@@ -4,9 +4,18 @@ node_modules/
 # build output
 dist/
 
-# environment
+# environment（保留模板）
 .env
-.env.local
+.env.*
+!.env.example
+!.env.sample
+
+# 数据库
+*.db
+*.sqlite
+
+# Claude Code 本机配置
+.claude/settings.local.json
 
 # logs
 *.log

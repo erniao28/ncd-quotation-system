@@ -205,11 +205,11 @@ export async function fetchSectionFiles(sectionId) {
   return res.json();
 }
 
-export async function uploadFile(sectionId, filename, fileType, fileData) {
+export async function uploadFile(sectionId, filename, fileType, fileData, dataDate) {
   const res = await fetch(`${API_BASE}/data/sections/${sectionId}/files`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ filename, fileType, fileData })
+    body: JSON.stringify({ filename, fileType, fileData, dataDate })
   });
   if (!res.ok) throw new Error('上传文件失败');
   return res.json();
@@ -270,5 +270,108 @@ export async function fetchIssuanceByDate(date) {
 export async function fetchMonthlyStats(month) {
   const res = await fetch(`${API_BASE}/data/issuance/stats/monthly?month=${month}`);
   if (!res.ok) throw new Error('获取月度统计失败');
+  return res.json();
+}
+
+export async function fetchIssuanceMatrix(startDate, endDate) {
+  const res = await fetch(`${API_BASE}/data/issuance/matrix?startDate=${startDate}&endDate=${endDate}`);
+  if (!res.ok) throw new Error('获取矩阵数据失败');
+  return res.json();
+}
+
+export async function fetchIssuanceBankCompare(startDate, endDate) {
+  const res = await fetch(`${API_BASE}/data/issuance/stats/compare?startDate=${startDate}&endDate=${endDate}`);
+  if (!res.ok) throw new Error('获取银行对比数据失败');
+  return res.json();
+}
+
+export async function addIssuanceData(records) {
+  const res = await fetch(`${API_BASE}/data/issuance/data`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ records })
+  });
+  if (!res.ok) throw new Error('录入发行量数据失败');
+  return res.json();
+}
+
+// ========== 到期量统计 API ==========
+
+export async function fetchMaturityDates() {
+  const res = await fetch(`${API_BASE}/data/maturity/dates`);
+  if (!res.ok) throw new Error('获取到期日期列表失败');
+  return res.json();
+}
+
+export async function fetchMaturityByDate(date) {
+  const res = await fetch(`${API_BASE}/data/maturity/${date}`);
+  if (!res.ok) throw new Error('获取到期数据失败');
+  return res.json();
+}
+
+export async function fetchMonthlyMaturityStats(month) {
+  const res = await fetch(`${API_BASE}/data/maturity/stats/monthly?month=${month}`);
+  if (!res.ok) throw new Error('获取月度到期统计失败');
+  return res.json();
+}
+
+export async function fetchMaturityMatrix(startDate, endDate) {
+  const res = await fetch(`${API_BASE}/data/maturity/matrix?startDate=${startDate}&endDate=${endDate}`);
+  if (!res.ok) throw new Error('获取到期矩阵数据失败');
+  return res.json();
+}
+
+// ========== 同业存单到期量 API（DM 抓取） ==========
+
+export async function fetchNcdMaturityDates() {
+  const res = await fetch(`${API_BASE}/data/ncd-maturity/dates`);
+  if (!res.ok) throw new Error('获取存单到期日期列表失败');
+  return res.json();
+}
+
+export async function fetchNcdMaturityByDate(date, category) {
+  const qs = category ? `?category=${encodeURIComponent(category)}` : '';
+  const res = await fetch(`${API_BASE}/data/ncd-maturity/${date}${qs}`);
+  if (!res.ok) throw new Error('获取存单到期明细失败');
+  return res.json();
+}
+
+export async function fetchNcdMaturitySummary(startDate, endDate, category, bank) {
+  const qs = new URLSearchParams({ startDate, endDate });
+  if (category) qs.set('category', category);
+  if (bank) qs.set('bank', bank);
+  const res = await fetch(`${API_BASE}/data/ncd-maturity/summary?${qs.toString()}`);
+  if (!res.ok) throw new Error('获取存单到期汇总失败');
+  return res.json();
+}
+
+export async function fetchNcdMaturityBankSummary(startDate, endDate, category, bank) {
+  const qs = new URLSearchParams({ startDate, endDate });
+  if (category) qs.set('category', category);
+  if (bank) qs.set('bank', bank);
+  const res = await fetch(`${API_BASE}/data/ncd-maturity/bank-summary?${qs.toString()}`);
+  if (!res.ok) throw new Error('获取存单银行汇总失败');
+  return res.json();
+}
+
+export async function fetchNcdCategories() {
+  const res = await fetch(`${API_BASE}/data/ncd-maturity/categories`);
+  if (!res.ok) throw new Error('获取存单类别失败');
+  return res.json();
+}
+
+export async function fetchNcdMaturityState() {
+  const res = await fetch(`${API_BASE}/data/ncd-maturity/state`);
+  if (!res.ok) throw new Error('获取抓取状态失败');
+  return res.json();
+}
+
+export async function syncNcdMaturity(mode = 'daily', months = 13, force = false) {
+  const res = await fetch(`${API_BASE}/data/ncd-maturity/sync`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode, months, force }),
+  });
+  if (!res.ok) throw new Error('抓取存单数据失败');
   return res.json();
 }

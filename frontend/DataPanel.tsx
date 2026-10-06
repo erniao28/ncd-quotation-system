@@ -13,6 +13,7 @@ interface DataFile {
   id: string;
   filename: string;
   file_type: string;
+  data_date: string | null;
   uploaded_at: number;
   file_data?: string;
 }
@@ -36,6 +37,11 @@ export const DataPanel: React.FC<DataPanelProps> = ({ sectionId, sectionName, on
   const [activeTab, setActiveTab] = useState<'files' | 'analysis'>('files');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // 上传弹窗状态
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [uploadDataDate, setUploadDataDate] = useState<string>('');
+
   // 图片日期筛选和轮播
   const [dateFilter, setDateFilter] = useState<string>('');
   const carouselRef = useRef<HTMLDivElement>(null);
@@ -58,18 +64,32 @@ export const DataPanel: React.FC<DataPanelProps> = ({ sectionId, sectionName, on
     loadData();
   }, [sectionId]);
 
-  // 处理文件上传
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // 处理文件选择 — 显示上传弹窗
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (!selectedFile) return;
 
-    console.log('[文件上传] 文件信息:', {
-      name: selectedFile.name,
-      type: selectedFile.type,
-      size: selectedFile.size
-    });
+    // 默认日期为今天
+    const today = new Date();
+    const y = today.getFullYear();
+    const m = String(today.getMonth() + 1).padStart(2, '0');
+    const d = String(today.getDate()).padStart(2, '0');
+    setUploadDataDate(`${y}-${m}-${d}`);
+    setPendingFile(selectedFile);
+    setShowUploadModal(true);
 
-    // 检查文件类型
+    // 重置 input，允许重复选择同一文件
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  // 确认上传
+  const handleConfirmUpload = async () => {
+    if (!pendingFile) return;
+    const selectedFile = pendingFile;
+
+    // 文件分类
     const fileType = selectedFile.type;
     let category = 'other';
     if (fileType.includes('excel') || fileType.includes('spreadsheet') || fileType.includes('office') || selectedFile.name.endsWith('.xlsx') || selectedFile.name.endsWith('.xls')) {
@@ -80,17 +100,12 @@ export const DataPanel: React.FC<DataPanelProps> = ({ sectionId, sectionName, on
       category = 'image';
     }
 
-    console.log('[文件上传] 分类:', category);
-
     setUploading(true);
     try {
-      // 读取文件为 Base64
       const fileData = await readFileAsBase64(selectedFile);
-      console.log('[文件上传] Base64 长度:', fileData.length);
-
-      const result = await uploadFile(sectionId, selectedFile.name, category, fileData);
-      console.log('[文件上传] 上传结果:', result);
-
+      const result = await uploadFile(sectionId, selectedFile.name, category, fileData, uploadDataDate || null);
+      setShowUploadModal(false);
+      setPendingFile(null);
       await loadData();
       alert('上传成功');
     } catch (error: any) {
@@ -98,10 +113,13 @@ export const DataPanel: React.FC<DataPanelProps> = ({ sectionId, sectionName, on
       alert('上传失败：' + (error.message || '未知错误'));
     } finally {
       setUploading(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
     }
+  };
+
+  // 取消上传
+  const handleCancelUpload = () => {
+    setShowUploadModal(false);
+    setPendingFile(null);
   };
 
   // 读取文件为 Base64
@@ -195,9 +213,9 @@ export const DataPanel: React.FC<DataPanelProps> = ({ sectionId, sectionName, on
     return `${year}-${month}-${day}`;
   };
 
-  // 根据日期筛选图片文件
+  // 根据数据日期（非上传日期）筛选文件
   const filteredFiles = dateFilter
-    ? files.filter(f => timestampToDateStr(f.uploaded_at) === dateFilter)
+    ? files.filter(f => f.data_date === dateFilter)
     : files;
 
   const imageFiles = filteredFiles.filter(f => f.file_type === 'image' && f.file_data);
@@ -285,64 +303,9 @@ export const DataPanel: React.FC<DataPanelProps> = ({ sectionId, sectionName, on
       {/* 文件列表 */}
       {activeTab === 'files' && (
         <div className="p-4">
-          {files.length === 0 ? (
-            <div className="text-center py-12 text-slate-400">
-              <div className="text-4xl mb-2">📂</div>
-              暂无文件，请上传
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {files.map(file => (
-                <div key={file.id} className="border border-slate-200 rounded-lg p-4 hover:shadow-md transition-shadow">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-3 flex-1">
-                      <span className="text-2xl">{getFileIcon(file.file_type)}</span>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-bold text-slate-800 truncate">{file.filename}</p>
-                        <p className="text-xs text-slate-500">{formatDate(file.uploaded_at)}</p>
-                      </div>
-                    </div>
-                  </div>
-                  {/* 图片预览 */}
-                  {file.file_type === 'image' && file.file_data && (
-                    <div
-                      className="mt-3 rounded-lg overflow-hidden border border-slate-200 cursor-pointer hover:shadow-md transition-shadow"
-                      onClick={() => previewImageFromData(file.file_data!)}
-                      title="点击查看大图"
-                    >
-                      <img src={file.file_data} alt={file.filename} className="w-full h-32 object-cover" />
-                    </div>
-                  )}
-                  <div className="flex gap-2 mt-3">
-                    {file.file_type === 'image' && (
-                      <button
-                        onClick={() => previewImageFromData(file.file_data!)}
-                        className="flex-1 px-2 py-1 bg-indigo-100 text-indigo-700 text-xs font-bold rounded hover:bg-indigo-200 transition-all"
-                      >
-                        预览
-                      </button>
-                    )}
-                    <button
-                      onClick={() => handleDownloadFile(file)}
-                      className="flex-1 px-2 py-1 bg-slate-100 text-slate-700 text-xs font-bold rounded hover:bg-slate-200 transition-all"
-                    >
-                      下载
-                    </button>
-                    <button
-                      onClick={() => handleDeleteFile(file.id)}
-                      className="flex-1 px-2 py-1 bg-red-50 text-red-600 text-xs font-bold rounded hover:bg-red-100 transition-all"
-                    >
-                      删除
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* 日期筛选和图片轮播 */}
+          {/* 日期筛选和图片轮播 — 移到顶部 */}
           {files.length > 0 && (
-            <div className="mt-4 pt-4 border-t border-slate-200">
+            <div className="mb-6 pb-6 border-b border-slate-200">
               {/* 日期筛选 */}
               <div className="flex items-center gap-3 mb-4">
                 <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -393,26 +356,19 @@ export const DataPanel: React.FC<DataPanelProps> = ({ sectionId, sectionName, on
                     style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
                   >
                     {imageFiles.map((file) => (
-                      <div
-                        key={file.id}
-                        className="flex-shrink-0 w-44 group"
-                      >
+                      <div key={file.id} className="flex-shrink-0 w-44 group">
                         <div
                           className="relative rounded-lg overflow-hidden border-2 border-slate-200 hover:border-indigo-400 cursor-pointer transition-all"
                           onClick={() => previewImageFromData(file.file_data!)}
                           title={file.filename}
                         >
-                          <img
-                            src={file.file_data}
-                            alt={file.filename}
-                            className="w-44 h-28 object-cover"
-                          />
+                          <img src={file.file_data} alt={file.filename} className="w-44 h-28 object-cover" />
                           <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[10px] px-2 py-1 truncate">
                             {file.filename}
                           </div>
                         </div>
                         <p className="text-[10px] text-slate-400 mt-1 truncate text-center">
-                          {formatDate(file.uploaded_at)}
+                          {file.data_date || formatDate(file.uploaded_at)}
                         </p>
                       </div>
                     ))}
@@ -427,6 +383,107 @@ export const DataPanel: React.FC<DataPanelProps> = ({ sectionId, sectionName, on
                   </button>
                 </div>
               )}
+            </div>
+          )}
+
+          {files.length === 0 ? (
+            <div className="text-center py-12 text-slate-400">
+              <div className="text-4xl mb-2">📂</div>
+              暂无文件，请上传
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {files.map(file => (
+                <div key={file.id} className="border border-slate-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-3 flex-1">
+                      <span className="text-2xl">{getFileIcon(file.file_type)}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-slate-800 truncate">{file.filename}</p>
+                        <p className="text-xs text-slate-500">
+                          {file.data_date ? `数据日期：${file.data_date}` : formatDate(file.uploaded_at)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  {/* 图片预览 */}
+                  {file.file_type === 'image' && file.file_data && (
+                    <div
+                      className="mt-3 rounded-lg overflow-hidden border border-slate-200 cursor-pointer hover:shadow-md transition-shadow"
+                      onClick={() => previewImageFromData(file.file_data!)}
+                      title="点击查看大图"
+                    >
+                      <img src={file.file_data} alt={file.filename} className="w-full h-32 object-cover" />
+                    </div>
+                  )}
+                  <div className="flex gap-2 mt-3">
+                    {file.file_type === 'image' && (
+                      <button
+                        onClick={() => previewImageFromData(file.file_data!)}
+                        className="flex-1 px-2 py-1 bg-indigo-100 text-indigo-700 text-xs font-bold rounded hover:bg-indigo-200 transition-all"
+                      >
+                        预览
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleDownloadFile(file)}
+                      className="flex-1 px-2 py-1 bg-slate-100 text-slate-700 text-xs font-bold rounded hover:bg-slate-200 transition-all"
+                    >
+                      下载
+                    </button>
+                    <button
+                      onClick={() => handleDeleteFile(file.id)}
+                      className="flex-1 px-2 py-1 bg-red-50 text-red-600 text-xs font-bold rounded hover:bg-red-100 transition-all"
+                    >
+                      删除
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* 上传弹窗 */}
+          {showUploadModal && pendingFile && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-xl p-6 w-96 shadow-2xl">
+                <h2 className="text-lg font-bold text-slate-800 mb-4">上传文件</h2>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-1">文件名</label>
+                    <p className="text-sm text-slate-600 bg-slate-50 rounded-lg px-3 py-2 truncate">
+                      {pendingFile.name}
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-1">
+                      数据日期
+                    </label>
+                    <input
+                      type="date"
+                      value={uploadDataDate}
+                      onChange={(e) => setUploadDataDate(e.target.value)}
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                    <p className="text-xs text-slate-400 mt-1">该文件代表的数据所属日期</p>
+                  </div>
+                </div>
+                <div className="flex gap-3 mt-6">
+                  <button
+                    onClick={handleConfirmUpload}
+                    disabled={uploading}
+                    className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg font-bold hover:bg-indigo-700 transition-all disabled:opacity-50"
+                  >
+                    {uploading ? '上传中...' : '确认上传'}
+                  </button>
+                  <button
+                    onClick={handleCancelUpload}
+                    className="flex-1 px-4 py-2 bg-slate-200 text-slate-700 rounded-lg font-bold hover:bg-slate-300 transition-all"
+                  >
+                    取消
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 

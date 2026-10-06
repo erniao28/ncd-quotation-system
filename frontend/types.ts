@@ -20,6 +20,9 @@ export interface Quotation {
   maturityWeekday: string;
   created_at?: number;
   updated_at?: number;
+  // API 返回的驼峰命名（与 snake_case 并存）
+  createdAt?: number;
+  updatedAt?: number;
 }
 
 export interface MaturityInfo {
