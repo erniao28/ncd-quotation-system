@@ -44,8 +44,11 @@ cp -r dist/* /var/www/html/
 # 4. 重启服务
 nginx -s reload
 cd ../backend
+npm install            # 同步新增依赖（OCR 等）
 pm2 restart ncd-backend  # 或 npm start
 ```
+
+> 图片识别功能要求 Nginx 的 `client_max_body_size` 不小于 `25m`（见下方配置），否则上传图片会返回 413。
 
 **🔒 安全配置**：
 - 后端绑定 `127.0.0.1:3000`（不直接暴露到公网）
@@ -59,6 +62,9 @@ pm2 restart ncd-backend  # 或 npm start
 server {
     listen 80;
     server_name 121.40.35.46;
+
+    # 报价图片识别会 POST 图片，需放宽请求体大小（Nginx 默认仅 1MB）
+    client_max_body_size 25m;
 
     # 基础认证（可选）
     auth_basic "NCD 报价系统 - 授权访问";
@@ -212,6 +218,16 @@ ncd-quotation-system/
 ---
 
 ## 更新日志
+
+### 2026-11-10 - v1.8.0
+**报价解析准确率提升 + 报价图片识别**
+
+- 解析器改为按银行名分段：同一行/同一段出现多家银行时分别归属，不再只识别第一家
+- 修复「浦发一年1.49」被识别成 `49` 的问题：小数优先解析，10-99 的裸数字不再当作收益率
+- 支持中文期限（一年 / 6个月 / 九个月等）、无空格写法（`兴业6M1.62`）和 BP 写法（`150bp → 1.50`）
+- 新增报价图片识别：支持上传、`Ctrl+V` 粘贴、拖入截图，一次识别图片中的多家银行和多个价格
+- 图片识别走后端本地 Tesseract OCR（chi_sim），不依赖外网服务；大图会自动压缩后上传
+- 后端新增 `POST /api/ocr`，部署时需执行 `cd backend && npm install`
 
 ### 2026-09-16 - v1.7.1
 **存单到期量：区间汇总支持按银行查看**

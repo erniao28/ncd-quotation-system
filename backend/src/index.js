@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 
 import apiRouter from './routes/api.js';
 import dataRouter from './routes/data.js';
+import ocrRouter from './routes/ocr.js';
 import { setupSocket } from './socket.js';
 import { initDatabase } from './database.js';
 import { initScheduler } from './scheduler.js';
@@ -25,11 +26,12 @@ app.use(cors({
 }));
 
 // 中间件
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '25mb' }));
 
 // API 路由
 app.use('/api', apiRouter);
 app.use('/api/data', dataRouter);
+app.use('/api', ocrRouter);
 
 // 健康检查
 app.get('/health', (req, res) => {

@@ -375,3 +375,18 @@ export async function syncNcdMaturity(mode = 'daily', months = 13, force = false
   if (!res.ok) throw new Error('抓取存单数据失败');
   return res.json();
 }
+
+// 报价图片 OCR
+export async function ocrImage(image) {
+  const res = await fetch(`${API_BASE}/ocr`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ image }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || '图片识别失败');
+  }
+  const data = await res.json();
+  return data.text || '';
+}

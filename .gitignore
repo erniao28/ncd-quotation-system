@@ -14,6 +14,15 @@ dist/
 *.db
 *.sqlite
 
+# OCR 运行时缓存
+backend/data/ocr-cache/
+
+# 本地 OCR 测试临时文件
+.tmp_ocr_test/
+
+# 部署前数据库备份（含生产数据，禁止提交）
+backup/
+
 # Claude Code 本机配置
 .claude/settings.local.json
 

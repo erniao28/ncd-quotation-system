@@ -1,7 +1,7 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Quotation, GroupedQuotation, MaturityInfo } from './types';
-import { parseQuotations, parseMaturityDates } from './services/parser';
+import { parseQuotations, parseMaturityDates, normalizeOcrText } from './services/parser';
 import { VisualCard } from './components/VisualCard';
 import { DataSupport } from './DataSupport';
 import {
@@ -18,11 +18,12 @@ import {
   emitQuotationAdd,
   emitQuotationUpdate,
   emitQuotationDelete,
-  emitMaturityUpdate
+  emitMaturityUpdate,
+  ocrImage
 } from './services/api';
 import html2canvas from 'html2canvas';
 
-const APP_VERSION = '20260914'; // 版本号：YYYYMMDD 格式
+const APP_VERSION = '20261110'; // 版本号：YYYYMMDD 格式
 
 const App: React.FC = () => {
   // 视图模式：'quote' = 报价系统，'data' = 数据支持
@@ -49,6 +50,11 @@ const App: React.FC = () => {
   const [selectedQuotes, setSelectedQuotes] = useState<Set<string>>(new Set());
   const [copySuccessMsg, setCopySuccessMsg] = useState('');
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+
+  // 报价图片识别
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const [isOcrRunning, setIsOcrRunning] = useState(false);
+  const [ocrStatus, setOcrStatus] = useState('');
 
   // 双击编辑模式 - 记录哪个 ID 处于编辑状态
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -224,11 +230,11 @@ const App: React.FC = () => {
     setMaturityInput('');
   };
 
-  const handleParse = async () => {
-    if (!inputText.trim()) return;
+  const parseQuotesFromText = async (text: string) => {
+    if (!text.trim()) return;
     setIsParsing(true);
     try {
-      const results = await parseQuotations(inputText, valueWeekday);
+      const results = await parseQuotations(text, valueWeekday);
       if (results.length === 0) {
         alert('解析成功但未发现报价项，请尝试更清晰的格式。');
       } else {
@@ -239,6 +245,72 @@ const App: React.FC = () => {
       alert('解析过程出错，请检查输入格式。');
     }
     finally { setIsParsing(false); }
+  };
+
+  const handleParse = () => parseQuotesFromText(inputText);
+
+  const readFileAsDataURL = (file: File): Promise<string> => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+
+  // 大图先压缩，避免上传过慢或超过后端大小限制
+  const prepareImage = async (file: File): Promise<string> => {
+    const dataUrl = await readFileAsDataURL(file);
+    if (file.size <= 1.5 * 1024 * 1024) return dataUrl;
+
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = dataUrl;
+    });
+
+    const maxSide = 2400;
+    const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
+    if (scale === 1) return dataUrl;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(image.width * scale);
+    canvas.height = Math.round(image.height * scale);
+    const context = canvas.getContext('2d');
+    if (!context) return dataUrl;
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', 0.9);
+  };
+
+  const handleImageFiles = async (files: File[]) => {
+    const images = files.filter(file => file.type.startsWith('image/'));
+    if (images.length === 0 || isOcrRunning) return;
+
+    setIsOcrRunning(true);
+    try {
+      const texts: string[] = [];
+      for (let i = 0; i < images.length; i++) {
+        setOcrStatus(`正在识别图片 ${i + 1}/${images.length}`);
+        const dataUrl = await prepareImage(images[i]);
+        const text = await ocrImage(dataUrl);
+        if (text.trim()) texts.push(normalizeOcrText(text));
+      }
+
+      const recognizedText = texts.join('\n').trim();
+      if (!recognizedText) {
+        alert('图片中未识别到文字，请换一张更清晰的截图。');
+        return;
+      }
+
+      const mergedText = [inputText.trim(), recognizedText].filter(Boolean).join('\n');
+      setInputText(mergedText);
+      await parseQuotesFromText(mergedText);
+    } catch (error: any) {
+      console.error('图片识别失败详情:', error);
+      alert('图片识别失败：' + (error?.message || '请稍后重试'));
+    } finally {
+      setIsOcrRunning(false);
+      setOcrStatus('');
+    }
   };
 
   const handleConfirmAdd = async () => {
@@ -1374,16 +1446,53 @@ const App: React.FC = () => {
              <textarea
                value={inputText}
                onChange={e => setInputText(e.target.value)}
+               onPaste={e => {
+                 const files = Array.from(e.clipboardData?.files || []);
+                 if (files.some(file => file.type.startsWith('image/'))) {
+                   e.preventDefault();
+                   handleImageFiles(files);
+                 }
+               }}
+               onDragOver={e => e.preventDefault()}
+               onDrop={e => {
+                 e.preventDefault();
+                 const files = Array.from(e.dataTransfer.files || []);
+                 if (files.some(file => file.type.startsWith('image/'))) handleImageFiles(files);
+               }}
                className="w-full h-32 p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-200 transition-all resize-none"
-               placeholder="可一次粘贴多条，格式: 兴业银行 AAA 周一 6M 1.62%，支持多行、逗号分隔"
+               placeholder="可一次粘贴多条，格式: 兴业银行 AAA 周一 6M 1.62%；也可直接粘贴、拖入或上传报价图片识别"
              ></textarea>
-             <button
-               disabled={isParsing}
-               onClick={handleParse}
-               className="w-full mt-3 py-3 bg-indigo-600 text-white rounded-xl font-bold shadow-xl hover:bg-indigo-700 transition-all disabled:opacity-50"
-             >
-               {isParsing ? '正在解析...' : '解析报价'}
-             </button>
+             <input
+               ref={imageInputRef}
+               type="file"
+               accept="image/*"
+               multiple
+               className="hidden"
+               onChange={e => {
+                 const files = Array.from(e.target.files || []);
+                 e.target.value = '';
+                 handleImageFiles(files);
+               }}
+             />
+             <div className="flex gap-2 mt-3">
+               <button
+                 disabled={isParsing || isOcrRunning}
+                 onClick={handleParse}
+                 className="flex-1 py-3 bg-indigo-600 text-white rounded-xl font-bold shadow-xl hover:bg-indigo-700 transition-all disabled:opacity-50"
+               >
+                 {isParsing ? '正在解析...' : '解析报价'}
+               </button>
+               <button
+                 disabled={isParsing || isOcrRunning}
+                 onClick={() => imageInputRef.current?.click()}
+                 className="flex-1 py-3 bg-teal-600 text-white rounded-xl font-bold shadow-xl hover:bg-teal-700 transition-all disabled:opacity-50"
+               >
+                 {isOcrRunning ? ocrStatus : '图片识别'}
+               </button>
+             </div>
+             <p className="text-[10px] text-slate-400 mt-2">
+               支持微信/聊天报价截图，一次可识别图片中的多家银行和多个价格；也可直接 Ctrl+V 粘贴图片。
+             </p>
           </section>
           )}
 
