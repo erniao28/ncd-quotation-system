@@ -45,6 +45,8 @@ const App: React.FC = () => {
   const [maturityInput, setMaturityInput] = useState('');
   const [isParsing, setIsParsing] = useState(false);
   const [recognizedQuotes, setRecognizedQuotes] = useState<Partial<Quotation>[]>([]);
+  const [isPublishing, setIsPublishing] = useState(false);
+  const publishingRef = useRef(false);
   const [allQuotes, setAllQuotes] = useState<Quotation[]>([]);
   const [maturities, setMaturities] = useState<MaturityInfo[]>([]);
   const [recognizedMaturities, setRecognizedMaturities] = useState<{ tenor: string; date: string; weekday: string }[]>([]);
@@ -348,6 +350,12 @@ const App: React.FC = () => {
   };
 
   const handleConfirmAdd = async () => {
+    // 防止连点导致并发发布：并发批次互相看不到对方写入的数据，会产生重复报价
+    if (publishingRef.current) return;
+    publishingRef.current = true;
+    setIsPublishing(true);
+
+    try {
     // 推入历史记录
     pushHistory(allQuotes);
 
@@ -461,6 +469,10 @@ const App: React.FC = () => {
 
     if (skippedCount > 0) {
       alert(`已发布 ${recognizedQuotes.length - skippedCount} 条报价，${skippedCount} 条因缺少银行名或收益率被跳过`);
+    }
+    } finally {
+      publishingRef.current = false;
+      setIsPublishing(false);
     }
   };
 
@@ -1689,7 +1701,13 @@ const App: React.FC = () => {
                 >
                   取消
                 </button>
-                <button onClick={handleConfirmAdd} className="btn btn-primary btn-tall flex-1">确认发布</button>
+                <button
+                  onClick={handleConfirmAdd}
+                  disabled={isPublishing}
+                  className="btn btn-primary btn-tall flex-1"
+                >
+                  {isPublishing ? '发布中...' : '确认发布'}
+                </button>
               </div>
             </div>
           )}
