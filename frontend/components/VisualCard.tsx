@@ -5,11 +5,9 @@ import { GroupedQuotation } from '../types';
 interface VisualCardProps {
   groupedQuotes: GroupedQuotation[];
   onEditMaturity?: (tenor: string, date: string, weekday: string) => void;
-  expanded?: boolean; // 是否在扩展模式（面板折叠时）
-  onToggleExpand?: () => void; // 点击切换扩展状态
 }
 
-export const VisualCard: React.FC<VisualCardProps> = ({ groupedQuotes, onEditMaturity, expanded = false, onToggleExpand }) => {
+export const VisualCard: React.FC<VisualCardProps> = ({ groupedQuotes, onEditMaturity }) => {
   const [editingTenor, setEditingTenor] = useState<string | null>(null);
   const [editDate, setEditDate] = useState('');
   const [editWeekday, setEditWeekday] = useState('');
@@ -55,18 +53,17 @@ export const VisualCard: React.FC<VisualCardProps> = ({ groupedQuotes, onEditMat
   );
 
   return (
-    <div id="capture-area" className={`bg-white p-0.5 border-2 border-slate-900 font-sans shadow-xl mx-auto w-full transition-all duration-300 cursor-pointer ${expanded ? 'max-w-[1100px] scale-110' : 'max-w-[850px]'}`}
-      onClick={onToggleExpand}>
-      <div className="bg-slate-900 p-2 flex justify-between items-end">
+    <div id="capture-area" className="board font-sans w-full">
+      <div className="board-head p-3 flex justify-between items-end">
         <div>
-          <h1 className="text-base font-black text-white tracking-tighter uppercase">NCD 一级市场最新报价看板</h1>
-          <p className="text-[7px] text-slate-400 font-bold tracking-[0.2em] mt-0.5">PRIMARY NEGOTIABLE CERTIFICATE OF DEPOSIT DAILY REPORT</p>
+          <h1 className="text-base font-black text-white tracking-tighter">存单一级市场报价</h1>
+          <p className="text-[7px] text-slate-400 font-medium font-mono tracking-[0.2em] mt-0.5">NEGOTIABLE CERTIFICATE OF DEPOSIT</p>
         </div>
         <div className="text-right flex flex-col items-end gap-0.5">
           <div className="flex gap-2 mb-0.5">
-             <span className="flex items-center gap-0.5 text-[7px] text-red-500 font-bold">● 提价 ↑</span>
-             <span className="flex items-center gap-0.5 text-[7px] text-emerald-500 font-bold">● 降价 ↓</span>
-             <span className="flex items-center gap-0.5 text-[7px] text-blue-500 font-bold">● 正常</span>
+             <span className="flex items-center gap-0.5 text-[7px] yield-up font-bold">● 提价 ↑</span>
+             <span className="flex items-center gap-0.5 text-[7px] yield-down font-bold">● 降价 ↓</span>
+             <span className="flex items-center gap-0.5 text-[7px] yield-flat font-bold">● 正常</span>
           </div>
           <p className="text-[7px] font-mono text-slate-500 font-bold">UPDATE: {new Date().toLocaleString('zh-CN', { hour12: false })}</p>
         </div>
@@ -173,14 +170,14 @@ export const VisualCard: React.FC<VisualCardProps> = ({ groupedQuotes, onEditMat
                     return (
                       <React.Fragment key={cat.key}>
                         <td className={`p-1.5 pl-2 ${innerBorder}`}>
-                          <span className={`text-[9px] font-bold ${hasItem ? (isUp ? 'text-red-600' : isDown ? 'text-emerald-600' : 'text-slate-700') : 'text-slate-300'}`}>
+                          <span className={`text-[9px] font-bold ${hasItem ? 'text-slate-700' : 'text-slate-300'}`}>
                             {item?.bankName || ' '}
                           </span>
                         </td>
                         <td className={`p-1.5 pr-2 ${borderRight}`}>
                           {hasItem ? (
                             <div className="flex items-center gap-1">
-                              <span className={`text-[9px] font-black font-mono ${isUp ? 'text-red-600' : isDown ? 'text-emerald-600' : 'text-blue-700'}`}>
+                              <span className={`text-[9px] font-black font-mono ${isUp ? 'yield-up' : isDown ? 'yield-down' : 'yield-flat'}`}>
                                 {item.yieldRate}
                               </span>
                               {item.remarks && (
@@ -205,9 +202,6 @@ export const VisualCard: React.FC<VisualCardProps> = ({ groupedQuotes, onEditMat
           })}
           </tbody>
         </table>
-      </div>
-      <div className="bg-slate-50 p-1 text-[6px] text-slate-400 font-black uppercase text-center border-t border-slate-200 tracking-[0.5em]">
-        SYSTEM GENERATED REPORT • ACCURACY GUARANTEED
       </div>
     </div>
   );

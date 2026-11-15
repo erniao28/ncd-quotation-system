@@ -390,3 +390,17 @@ export async function ocrImage(image) {
   const data = await res.json();
   return data.text || '';
 }
+
+// 看板图 OCR：返回表头/表体的词块坐标，由前端按列还原期限
+export async function ocrBoard(image) {
+  const res = await fetch(`${API_BASE}/ocr`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ image, mode: 'board' }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || '图片识别失败');
+  }
+  return res.json();
+}

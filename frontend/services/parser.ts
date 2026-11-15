@@ -1,6 +1,6 @@
 // 报价解析器：支持同一行多银行、中英文期限、无空格收益率以及 OCR 文本
 
-const BANKS = [
+export const BANKS = [
   '工商银行', '农业银行', '中国银行', '建设银行', '交通银行', '邮储银行',
   '中信银行', '光大银行', '华夏银行', '广发银行', '平安银行', '招商银行',
   '浦发银行', '兴业银行', '浙商银行', '渤海银行', '恒丰银行', '民生银行',
@@ -299,7 +299,7 @@ function findVolume(text: string): string {
   return '';
 }
 
-function getCategory(bankName: string, rating: string = 'AAA'): string {
+export function getCategory(bankName: string, rating: string = 'AAA'): string {
   const bigBanks = [
     '工商银行', '农业银行', '中国银行', '建设银行', '交通银行', '邮储银行',
     '中信银行', '光大银行', '华夏银行', '广发银行', '平安银行', '招商银行',
