@@ -5,9 +5,10 @@ import { GroupedQuotation } from '../types';
 interface VisualCardProps {
   groupedQuotes: GroupedQuotation[];
   onEditMaturity?: (tenor: string, date: string, weekday: string) => void;
+  visibleCategoryKeys?: string[];
 }
 
-export const VisualCard: React.FC<VisualCardProps> = ({ groupedQuotes, onEditMaturity }) => {
+export const VisualCard: React.FC<VisualCardProps> = ({ groupedQuotes, onEditMaturity, visibleCategoryKeys = ['BIG', 'AAA', 'AA+'] }) => {
   const [editingTenor, setEditingTenor] = useState<string | null>(null);
   const [editDate, setEditDate] = useState('');
   const [editWeekday, setEditWeekday] = useState('');
@@ -30,9 +31,12 @@ export const VisualCard: React.FC<VisualCardProps> = ({ groupedQuotes, onEditMat
     { key: 'BIG', label: '大行&国股' },
     { key: 'AAA', label: 'AAA 城农商' },
     { key: 'AA+', label: 'AA+' }
-  ];
+  ].filter(cat => visibleCategoryKeys.includes(cat.key));
 
   const tenors = ['1M', '3M', '6M', '9M', '1Y'];
+
+  // 隐藏列后剩余列会变宽，内容居中避免一侧留白过多
+  const isCondensed = categories.length < 3;
 
   // 统一边框格式：每个类别之间都用深色边框分隔
   const getBorderRight = (idx: number) => {
@@ -44,7 +48,7 @@ export const VisualCard: React.FC<VisualCardProps> = ({ groupedQuotes, onEditMat
   // 类别内部边框（银行名和收益率之间）- 浅色
   const getInnerBorderRight = () => 'border-r border-slate-200';
 
-  if (groupedQuotes.length === 0) return (
+  if (groupedQuotes.length === 0 || categories.length === 0) return (
     <div className="flex flex-col items-center justify-center h-[500px] bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200 text-slate-300 italic">
       <div className="text-4xl mb-4 opacity-20">📊</div>
       暂无报价数据
@@ -170,14 +174,14 @@ export const VisualCard: React.FC<VisualCardProps> = ({ groupedQuotes, onEditMat
                     // 行已有统一边框，单元格只需保留右边框
                     return (
                       <React.Fragment key={cat.key}>
-                        <td className={`px-2.5 py-1.5 ${innerBorder}`}>
+                        <td className={`px-2.5 py-1.5 ${innerBorder} ${isCondensed ? 'text-center' : ''}`}>
                           <span className={`text-[12px] font-bold ${hasItem ? 'text-slate-700' : 'text-slate-300'}`}>
                             {item?.bankName || ' '}
                           </span>
                         </td>
                         <td className={`px-2.5 py-1.5 ${borderRight}`}>
                           {hasItem ? (
-                            <div className="flex items-center gap-1.5">
+                            <div className={`flex items-center gap-1.5 ${isCondensed ? 'justify-center' : ''}`}>
                               <span className={`text-[14px] font-black font-mono leading-tight ${isUp ? 'yield-up' : isDown ? 'yield-down' : 'yield-flat'}`}>
                                 {item.yieldRate}
                               </span>

@@ -27,6 +27,13 @@ import html2canvas from 'html2canvas';
 
 const APP_VERSION = '20261116'; // 版本号：YYYYMMDD 格式
 
+// 看板图片可选的类别列（顺序固定）
+const BOARD_CATEGORY_OPTIONS = [
+  { key: 'BIG', label: '大行', fullLabel: '大行&国股' },
+  { key: 'AAA', label: 'AAA', fullLabel: 'AAA 城农商' },
+  { key: 'AA+', label: 'AA+', fullLabel: 'AA+' }
+];
+
 const App: React.FC = () => {
   // 视图模式：'quote' = 报价系统，'data' = 数据支持
   const [viewMode, setViewMode] = useState<'quote' | 'data'>('quote');
@@ -65,6 +72,32 @@ const App: React.FC = () => {
   const [selectedQuotes, setSelectedQuotes] = useState<Set<string>>(new Set());
   const [copySuccessMsg, setCopySuccessMsg] = useState('');
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+
+  // 看板图片显示的类别列，记住上次选择
+  const [boardColumns, setBoardColumns] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('ncd-board-columns');
+      const parsed = saved ? JSON.parse(saved) : null;
+      if (Array.isArray(parsed)) {
+        const valid = BOARD_CATEGORY_OPTIONS.map(opt => opt.key).filter(key => parsed.includes(key));
+        if (valid.length > 0) return valid;
+      }
+    } catch {
+      // 读取失败时回退到全选
+    }
+    return BOARD_CATEGORY_OPTIONS.map(opt => opt.key);
+  });
+  useEffect(() => {
+    localStorage.setItem('ncd-board-columns', JSON.stringify(boardColumns));
+  }, [boardColumns]);
+  const toggleBoardColumn = (key: string) => {
+    setBoardColumns(prev => {
+      const next = prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key];
+      // 至少保留一列，且始终按固定顺序排列
+      const ordered = BOARD_CATEGORY_OPTIONS.map(opt => opt.key).filter(k => next.includes(k));
+      return ordered.length > 0 ? ordered : prev;
+    });
+  };
 
   // 报价图片识别
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -1523,7 +1556,33 @@ const App: React.FC = () => {
               ↓-0.5bp
             </button>
           </div>
-          <button onClick={handleCopyCardAsImage} className="btn btn-secondary ml-auto">
+          <div className="ml-auto flex items-center gap-2">
+            <span className="micro text-slate-500">图片列</span>
+            {BOARD_CATEGORY_OPTIONS.map(opt => {
+              const checked = boardColumns.includes(opt.key);
+              return (
+                <label
+                  key={opt.key}
+                  title={`${checked ? '隐藏' : '显示'}「${opt.fullLabel}」列`}
+                  className={`flex items-center gap-1.5 text-xs font-semibold cursor-pointer select-none ${
+                    checked ? 'text-slate-700' : 'text-slate-400'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={checked && boardColumns.length === 1}
+                    onChange={() => toggleBoardColumn(opt.key)}
+                    className="cursor-pointer"
+                    style={{ accentColor: 'var(--accent)' }}
+                  />
+                  {opt.label}
+                </label>
+              );
+            })}
+          </div>
+          <div className="w-px h-5 bg-slate-300" />
+          <button onClick={handleCopyCardAsImage} className="btn btn-secondary">
             生成图片
           </button>
         </div>
@@ -1767,6 +1826,7 @@ const App: React.FC = () => {
               <VisualCard
                 groupedQuotes={groupedQuotes}
                 onEditMaturity={handleUpdateMaturity}
+                visibleCategoryKeys={boardColumns}
               />
             )}
 
