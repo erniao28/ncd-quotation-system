@@ -62,7 +62,8 @@ const EXTRA_BOARD_BANKS = [
   '桂林银行', '富滇银行', '江西银行', '九江银行', '徽商银行', '东亚银行',
   '重庆三峡银行', '中阳银行', '青岛农商行', '秦农农商银行', '萧山农商银行',
   '成都农商银行', '广东南海农商行', '东莞农村商业银行', '重庆农村商业银行',
-  '江苏江南农商行',
+  '江苏江南农商行', '江苏江南农村商业银行', '上海华瑞银行', '广东华兴银行',
+  '大华银行', '广西北部湾银行', '武汉农商行', '富邦华一银行',
 ];
 
 const BANK_CANDIDATES = Array.from(new Set([...BANKS, ...EXTRA_BOARD_BANKS]));
@@ -74,17 +75,22 @@ const NAME_FIXES: Array<[RegExp, string]> = [
   [/恒主|全丰/g, '恒丰'],
   [/浙有|浙高/g, '浙商'],
   [/济海|潢海|涝海/g, '渤海'],
-  [/激商|谷有|微商/g, '徽商'],
+  [/激商|谷有|微商|微有|油商|笤有|答有/g, '徽商'],
   [/素农/g, '秦农'],
   [/三睦|三圭|三屿|三起|三叶/g, '三峡'],
   [/吕阳|雪阳|糙阳|足阳/g, '中阳'],
+  [/豆阳/g, '贵阳'],
   [/齐重/g, '齐鲁'],
   [/大注/g, '大连'],
   [/东于|东劳/g, '东亚'],
   [/东蔓/g, '东莞'],
-  [/丙京/g, '南京'],
-  [/桂杯/g, '桂林'],
-  [/荒山/g, '萧山'],
+  [/丙京|丙真|育京/g, '南京'],
+  [/桂杯|桂酌/g, '桂林'],
+  [/荒山|(?:赣|黄)山(?=农商)/g, '萧山'],
+  [/央了/g, '中原'],
+  [/搬门/g, '厦门'],
+  [/国乐/g, '国际'],
+  [/华闵/g, '华兴'],
   [/照殷/g, '日照'],
   [/江天/g, '江西'],
   [/过海|再海/g, '南海'],
@@ -98,7 +104,7 @@ const NAME_FIXES: Array<[RegExp, string]> = [
   [/农商海$/g, '农商银行'],
   [/日照行/g, '日照银行'],
   [/少行/g, '行'],
-  [/淄行|当行|雪行|搬行|染行|衍行|狠行|恨行|必行|用行|殷行|梁行|海行|红行|滋行|溪行/g, '银行'],
+  [/淄行|当行|雪行|搬行|染行|衍行|狠行|恨行|必行|用行|殷行|梁行|海行|红行|滋行|溪行|混行|老行|漫行/g, '银行'],
 ];
 
 // 比较银行名时忽略“银行/农商/农村/有”等结构性字，避免 OCR 把后缀认错就完全匹配不上
@@ -224,6 +230,21 @@ function formatRate(value: number): string {
   return text;
 }
 
+// 看板收益率都以 0.5bp 为步长（1.405 / 1.415 / 1.435 …）。OCR 偶尔认错末位
+// （1.44 → 1447）或把涨跌标注粘到小数末尾（1.4351），此时去掉最后一位小数正好回到网格上
+function onHalfBpGrid(value: number): boolean {
+  const scaled = value * 200;
+  return Math.abs(scaled - Math.round(scaled)) < 1e-4;
+}
+
+function trimGridNoise(value: number): number {
+  if (onHalfBpGrid(value)) return value;
+  const [integer, fraction = ''] = value.toFixed(6).replace(/0+$/, '').split('.');
+  if (fraction.length <= 2) return value;
+  const trimmed = parseFloat(`${integer}.${fraction.slice(0, -1)}`);
+  return onHalfBpGrid(trimmed) ? trimmed : value;
+}
+
 function normalizeYield(raw: string): string | null {
   const cleaned = raw.replace(/[^\d.]/g, '');
   if (!cleaned) return null;
@@ -232,8 +253,7 @@ function normalizeYield(raw: string): string | null {
   if (cleaned.includes('.')) {
     const [, decimals = ''] = cleaned.split('.');
     if (decimals.length > 4) return null;
-    // OCR 偶尔把涨跌标注“1”粘在 4 位小数末尾（如 1.4351），去掉末位
-    value = parseFloat(decimals.length === 4 && decimals.endsWith('1') ? cleaned.slice(0, -1) : cleaned);
+    value = parseFloat(cleaned);
   } else if (cleaned.length === 1) {
     value = parseFloat(cleaned);
   } else if (cleaned.length === 3) {
@@ -246,7 +266,9 @@ function normalizeYield(raw: string): string | null {
     return null;
   }
 
-  if (!Number.isFinite(value) || value < 0.1 || value > 10) return null;
+  if (!Number.isFinite(value)) return null;
+  value = trimGridNoise(value);
+  if (value < 0.1 || value > 10) return null;
   return formatRate(value);
 }
 
@@ -274,7 +296,8 @@ function cleanRemarks(raw: string): string {
   const text = raw.replace(/\s+/g, '');
   const notes: string[] = [];
 
-  if (/限非银|限非/.test(text)) notes.push('限非银');
+  // “银”常被 OCR 认成“良/艮”
+  if (/非(?:银|良|艮)|限非/.test(text)) notes.push('限非银');
   const volume = text.match(/(\d+(?:\.\d+)?)[万亿]/);
   if (volume) notes.push(`募集${volume[1]}${text.includes('亿') ? '亿' : '万'}`);
   const change = text.match(/(\d+(?:\.\d+)?)\+/);
@@ -299,7 +322,9 @@ function matchBank(raw: string): string {
     const coreScore = similarity(normalized.replace(STRUCTURAL_RE, ''), bank.replace(STRUCTURAL_RE, ''));
     const fullScore = similarity(normalized, bank);
     const prefixScore = similarity(normalized, bank.slice(0, normalized.length));
-    const score = coreScore + fullScore * 0.01 + prefixScore * 0.02;
+    // 取三种口径的最高分：单字之差的 OCR 错字不应被“去结构字”后的低分拖累；
+    // 再用全名/前缀分做小数位加权，避免去结构字后同分时选错银行
+    const score = Math.max(coreScore, fullScore, prefixScore) + fullScore * 0.001 + prefixScore * 0.002;
     if (score > bestScore) {
       bestScore = score;
       bestBank = bank;
