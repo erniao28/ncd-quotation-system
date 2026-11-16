@@ -233,6 +233,20 @@ const App: React.FC = () => {
     setMaturityInput('');
   };
 
+  // 同一「银行+期限」只保留一条：后出现的覆盖先出现的（看板识别结果排在最后，优先）
+  const dedupeRecognizedQuotes = (list: Partial<Quotation>[]) => {
+    const keyed = new Map<string, Partial<Quotation>>();
+    const rest: Partial<Quotation>[] = [];
+    for (const q of list) {
+      if (!q.bankName || !q.tenor) {
+        rest.push(q);
+        continue;
+      }
+      keyed.set(`${q.tenor}|${q.bankName}`, q);
+    }
+    return [...keyed.values(), ...rest];
+  };
+
   const parseQuotesFromText = async (text: string) => {
     if (!text.trim()) return;
     setIsParsing(true);
@@ -241,7 +255,7 @@ const App: React.FC = () => {
       if (results.length === 0) {
         alert('解析成功但未发现报价项，请尝试更清晰的格式。');
       } else {
-        setRecognizedQuotes(results);
+        setRecognizedQuotes(dedupeRecognizedQuotes(results));
       }
     } catch (error: any) {
       console.error("识别失败详情:", error);
@@ -327,7 +341,7 @@ const App: React.FC = () => {
         const textQuotes = recognizedText
           ? await parseQuotations(recognizedText, valueWeekday)
           : [];
-        setRecognizedQuotes([...existingQuotes, ...textQuotes, ...boardQuotes]);
+        setRecognizedQuotes(dedupeRecognizedQuotes([...existingQuotes, ...textQuotes, ...boardQuotes]));
         setInputText(prev => [prev.trim(), recognizedText].filter(Boolean).join('\n'));
         return;
       }
