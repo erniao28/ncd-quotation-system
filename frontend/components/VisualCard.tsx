@@ -25,12 +25,11 @@ export const VisualCard: React.FC<VisualCardProps> = ({ groupedQuotes, onEditMat
     setEditingTenor(null);
   };
 
-  // 4 个类别：大行&国股、AAA 城农商、AA+、AA-
+  // 生成图片只保留到 AA+：大行&国股、AAA 城农商、AA+
   const categories = [
     { key: 'BIG', label: '大行&国股' },
     { key: 'AAA', label: 'AAA 城农商' },
-    { key: 'AA+', label: 'AA+' },
-    { key: 'AA-', label: 'AA-' }
+    { key: 'AA+', label: 'AA+' }
   ];
 
   const tenors = ['1M', '3M', '6M', '9M', '1Y'];
@@ -39,7 +38,7 @@ export const VisualCard: React.FC<VisualCardProps> = ({ groupedQuotes, onEditMat
   const getBorderRight = (idx: number) => {
     const isLast = idx === categories.length - 1;
     if (isLast) return 'border-r-0';
-    return 'border-r-2 border-slate-600'; // 类别之间用深色边框
+    return 'border-r-2 border-slate-600';
   };
 
   // 类别内部边框（银行名和收益率之间）- 浅色
@@ -54,30 +53,30 @@ export const VisualCard: React.FC<VisualCardProps> = ({ groupedQuotes, onEditMat
 
   return (
     <div id="capture-area" className="board font-sans w-full">
-      <div className="board-head p-3 flex justify-between items-end">
+      <div className="board-head px-5 py-3.5 flex justify-between items-end">
         <div>
-          <h1 className="text-base font-black text-white tracking-tighter">存单一级市场报价</h1>
-          <p className="text-[7px] text-slate-400 font-medium font-mono tracking-[0.2em] mt-0.5">NEGOTIABLE CERTIFICATE OF DEPOSIT</p>
+          <h1 className="text-xl font-black text-white tracking-tighter leading-none">存单一级市场报价</h1>
+          <p className="text-[9px] text-slate-400 font-medium font-mono tracking-[0.2em] mt-1">NEGOTIABLE CERTIFICATE OF DEPOSIT</p>
         </div>
-        <div className="text-right flex flex-col items-end gap-0.5">
-          <div className="flex gap-2 mb-0.5">
-             <span className="flex items-center gap-0.5 text-[7px] yield-up font-bold">● 提价 ↑</span>
-             <span className="flex items-center gap-0.5 text-[7px] yield-down font-bold">● 降价 ↓</span>
-             <span className="flex items-center gap-0.5 text-[7px] yield-flat font-bold">● 正常</span>
+        <div className="text-right flex flex-col items-end gap-1">
+          <div className="flex gap-3">
+             <span className="flex items-center gap-0.5 text-[9.5px] yield-up font-bold">● 提价 ↑</span>
+             <span className="flex items-center gap-0.5 text-[9.5px] yield-down font-bold">● 降价 ↓</span>
+             <span className="flex items-center gap-0.5 text-[9.5px] yield-flat font-bold">● 正常</span>
           </div>
-          <p className="text-[7px] font-mono text-slate-500 font-bold">UPDATE: {new Date().toLocaleString('zh-CN', { hour12: false })}</p>
+          <p className="text-[9px] font-mono text-slate-500 font-bold">UPDATE: {new Date().toLocaleString('zh-CN', { hour12: false })}</p>
         </div>
       </div>
 
       <div className="overflow-x-hidden">
         <table className="w-full border-collapse table-fixed">
           <thead>
-            <tr className="bg-slate-100 text-slate-600 text-[8px] font-black uppercase">
-              <th className="p-1.5 border-r-2 border-slate-600 border-b-2 border-slate-900 w-16">期限</th>
+            <tr className="bg-slate-100 text-slate-600 text-[11px] font-black uppercase">
+              <th className="py-2 px-2 border-r-2 border-slate-600 border-b-2 border-slate-900 w-24">期限</th>
               {categories.map((cat, idx) => {
                 const borderRight = getBorderRight(idx);
                 return (
-                  <th key={cat.key} className={`p-1.5 ${borderRight} border-b-2 border-slate-900 text-center`} colSpan={2}>
+                  <th key={cat.key} className={`py-2 px-2 ${borderRight} border-b-2 border-slate-900 text-center`} colSpan={2}>
                     {cat.label}
                   </th>
                 );
@@ -98,24 +97,24 @@ export const VisualCard: React.FC<VisualCardProps> = ({ groupedQuotes, onEditMat
                 return (
                 <tr key={`${tenor}-${rowIndex}`} className={rowBorderClass}>
                   {rowIndex === 0 && (
-                    <td className="bg-slate-50 border-r-2 border-slate-600 p-1.5 text-center align-middle" rowSpan={maxRows}>
+                    <td className="bg-slate-50 border-r-2 border-slate-600 px-2 py-2 text-center align-middle" rowSpan={maxRows}>
                       <div className="flex flex-col items-center">
-                        <span className="text-base font-black text-slate-900">{tenor}</span>
-                        <div className="mt-0.5 text-[6px] text-slate-400 font-bold flex items-center gap-1">
+                        <span className="text-[22px] font-black text-slate-900 leading-none">{tenor}</span>
+                        <div className="mt-1.5 text-[8px] text-slate-400 font-bold flex items-center gap-1">
                           {editingTenor === tenor ? (
-                            <div className="flex flex-col gap-0.5">
+                            <div className="flex flex-col gap-1">
                               <div className="flex gap-0.5">
                                 <input
                                   type="text"
                                   value={editDate}
                                   onChange={(e) => setEditDate(e.target.value)}
                                   placeholder="日期"
-                                  className="w-12 text-[6px] border border-slate-300 rounded px-0.5"
+                                  className="w-16 text-[8px] border border-slate-300 rounded px-1 py-0.5"
                                 />
                                 <select
                                   value={editWeekday}
                                   onChange={(e) => setEditWeekday(e.target.value)}
-                                  className="w-10 text-[6px] border border-slate-300 rounded px-0.5"
+                                  className="w-12 text-[8px] border border-slate-300 rounded px-0.5 py-0.5"
                                 >
                                   <option value="">周</option>
                                   <option value="周一">一</option>
@@ -130,28 +129,30 @@ export const VisualCard: React.FC<VisualCardProps> = ({ groupedQuotes, onEditMat
                               <div className="flex gap-0.5">
                                 <button
                                   onClick={handleSave}
-                                  className="flex-1 text-[5px] bg-emerald-500 text-white rounded px-0.5"
+                                  className="flex-1 text-[7px] bg-emerald-500 text-white rounded px-1 py-0.5"
                                 >
                                   保存
                                 </button>
                                 <button
                                   onClick={() => setEditingTenor(null)}
-                                  className="flex-1 text-[5px] bg-slate-300 text-slate-700 rounded px-0.5"
+                                  className="flex-1 text-[7px] bg-slate-300 text-slate-700 rounded px-1 py-0.5"
                                 >
                                   取消
                                 </button>
                               </div>
                             </div>
                           ) : (
-                            <div className="flex items-center gap-1 whitespace-nowrap">
-                              <span className="text-[6px] text-slate-600 font-bold">{group?.maturityDate || '--'}</span>
-                              <span className="text-[5px] text-slate-400">{group?.maturityWeekday || ''}</span>
-                              <button
-                                onClick={() => handleEditClick(tenor, group?.maturityDate || '', group?.maturityWeekday || '')}
-                                className="text-[4px] text-indigo-400 hover:text-indigo-600 font-bold"
-                              >
-                                编辑
-                              </button>
+                            <div className="flex flex-col items-center gap-0.5 whitespace-nowrap">
+                              <span className="text-[9px] text-slate-600 font-bold font-mono">{group?.maturityDate || '--'}</span>
+                              <div className="flex items-center gap-1">
+                                <span className="text-[8px] text-slate-400">{group?.maturityWeekday || ''}</span>
+                                <button
+                                  onClick={() => handleEditClick(tenor, group?.maturityDate || '', group?.maturityWeekday || '')}
+                                  className="capture-hide text-[7px] text-indigo-400 hover:text-indigo-600 font-bold"
+                                >
+                                  编辑
+                                </button>
+                              </div>
                             </div>
                           )}
                         </div>
@@ -169,22 +170,22 @@ export const VisualCard: React.FC<VisualCardProps> = ({ groupedQuotes, onEditMat
                     // 行已有统一边框，单元格只需保留右边框
                     return (
                       <React.Fragment key={cat.key}>
-                        <td className={`p-1.5 pl-2 ${innerBorder}`}>
-                          <span className={`text-[9px] font-bold ${hasItem ? 'text-slate-700' : 'text-slate-300'}`}>
+                        <td className={`px-2.5 py-1.5 ${innerBorder}`}>
+                          <span className={`text-[12px] font-bold ${hasItem ? 'text-slate-700' : 'text-slate-300'}`}>
                             {item?.bankName || ' '}
                           </span>
                         </td>
-                        <td className={`p-1.5 pr-2 ${borderRight}`}>
+                        <td className={`px-2.5 py-1.5 ${borderRight}`}>
                           {hasItem ? (
-                            <div className="flex items-center gap-1">
-                              <span className={`text-[9px] font-black font-mono ${isUp ? 'yield-up' : isDown ? 'yield-down' : 'yield-flat'}`}>
+                            <div className="flex items-center gap-1.5">
+                              <span className={`text-[14px] font-black font-mono leading-tight ${isUp ? 'yield-up' : isDown ? 'yield-down' : 'yield-flat'}`}>
                                 {item.yieldRate}
                               </span>
                               {item.remarks && (
-                                <span className="text-[7px] text-slate-500 font-medium truncate flex-1" title={item.remarks}>{item.remarks}</span>
+                                <span className="text-[9px] text-slate-500 font-medium truncate flex-1" title={item.remarks}>{item.remarks}</span>
                               )}
                               {item.volume && (
-                                <span className="text-[7px] font-bold text-slate-600 bg-slate-100 px-1 rounded shrink-0">
+                                <span className="text-[8.5px] font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded shrink-0">
                                   {item.volume}
                                 </span>
                               )}

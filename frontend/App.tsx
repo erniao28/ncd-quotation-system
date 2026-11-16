@@ -937,6 +937,10 @@ const App: React.FC = () => {
           if (cloned) {
             cloned.style.overflow = 'visible';
             cloned.style.width = cardElement.offsetWidth + 'px';
+            // 编辑入口只在页面交互时出现，不应进入导出的图片
+            cloned.querySelectorAll('.capture-hide').forEach((element) => {
+              (element as HTMLElement).style.display = 'none';
+            });
           }
         }
       });
