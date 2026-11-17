@@ -411,12 +411,21 @@ export function parseQuotations(text: string, defaultWeekday: string = '周一')
     results.push(...buildQuotes(prefix, mentions[0].bank, defaultWeekday));
   }
 
+  // 多家银行共用一个报价的写法（长沙银行 广州银行 江南农商 1Y 1.43）：
+  // 收益率只写在最后一家银行后面，前面几家要一起分享这段报价
+  const pendingBanks: string[] = [];
   for (let i = 0; i < mentions.length; i++) {
     const start = mentions[i].end;
     const end = i + 1 < mentions.length ? mentions[i + 1].index : normalized.length;
     const body = normalized.slice(start, end);
-    if (!body.trim()) continue;
-    results.push(...buildQuotes(body, mentions[i].bank, defaultWeekday));
+    if (parseTenorRates(body).length === 0) {
+      pendingBanks.push(mentions[i].bank);
+      continue;
+    }
+    for (const bank of [...pendingBanks, mentions[i].bank]) {
+      results.push(...buildQuotes(body, bank, defaultWeekday));
+    }
+    pendingBanks.length = 0;
   }
 
   return results;

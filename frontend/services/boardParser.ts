@@ -12,6 +12,12 @@ export interface OcrWord {
   color?: 'red' | 'green' | 'black';
 }
 
+export interface BoardSection {
+  text: string;
+  top: number;
+  bottom: number;
+}
+
 export interface BoardOcrResult {
   board: boolean;
   width: number;
@@ -21,6 +27,7 @@ export interface BoardOcrResult {
   bodyText?: string;
   headerWords?: OcrWord[];
   bodyWords?: OcrWord[];
+  sections?: BoardSection[];
 }
 
 export interface BoardQuote {
@@ -64,6 +71,10 @@ const EXTRA_BOARD_BANKS = [
   '成都农商银行', '广东南海农商行', '东莞农村商业银行', '重庆农村商业银行',
   '江苏江南农商行', '江苏江南农村商业银行', '上海华瑞银行', '广东华兴银行',
   '大华银行', '广西北部湾银行', '武汉农商行', '富邦华一银行',
+  '湖南银行', '泸州银行', '柳州银行', '长安银行', '浙江民泰商行',
+  '中山农商行', '福建海峡银行', '广东南粤银行', '长城华西银行',
+  '四川天府银行', '绵阳市商业银行', '天津滨海农村商行', '浙江绍兴瑞丰农商行',
+  '四川银行', '江门农商银行', '宜宾市商业银行',
 ];
 
 const BANK_CANDIDATES = Array.from(new Set([...BANKS, ...EXTRA_BOARD_BANKS]));
@@ -74,8 +85,14 @@ const NAME_FIXES: Array<[RegExp, string]> = [
   [/华页|华克/g, '华夏'],
   [/恒主|全丰/g, '恒丰'],
   [/浙有|浙高/g, '浙商'],
-  [/济海|潢海|涝海/g, '渤海'],
+  [/满海|济海|潢海|涝海/g, '渤海'],
   [/激商|谷有|微商|微有|油商|笤有|答有/g, '徽商'],
+  [/微银行/g, '徽商银行'],
+  [/十江/g, '九江'],
+  [/海睦/g, '海峡'],
+  [/许州|闽了州/g, '郑州'],
+  [/中州/g, '中原'],
+  [/天滨海津/g, '天津滨海'],
   [/素农/g, '秦农'],
   [/三睦|三圭|三屿|三起|三叶/g, '三峡'],
   [/吕阳|雪阳|糙阳|足阳/g, '中阳'],
@@ -104,7 +121,7 @@ const NAME_FIXES: Array<[RegExp, string]> = [
   [/农商海$/g, '农商银行'],
   [/日照行/g, '日照银行'],
   [/少行/g, '行'],
-  [/淄行|当行|雪行|搬行|染行|衍行|狠行|恨行|必行|用行|殷行|梁行|海行|红行|滋行|溪行|混行|老行|漫行/g, '银行'],
+  [/淄行|当行|雪行|搬行|染行|衍行|狠行|恨行|必行|用行|殷行|梁行|海行|红行|滋行|溪行|混行|老行|漫行|泥行|按行|毛行/g, '银行'],
 ];
 
 // 比较银行名时忽略“银行/农商/农村/有”等结构性字，避免 OCR 把后缀认错就完全匹配不上
@@ -316,6 +333,9 @@ function matchBank(raw: string): string {
     .replace(/^(和|了|已|人)+/, '')
     .replace(/(和|了|已|限非银|限非)+$/, '');
 
+  // 只剩“银行/农商”这类结构字时无法判断是哪家银行，宁可丢弃也不要匹配成错误银行
+  if (normalized.replace(STRUCTURAL_RE, '').length === 0) return '';
+
   let bestBank = '';
   let bestScore = -1;
   for (const bank of BANK_CANDIDATES) {
@@ -334,7 +354,22 @@ function matchBank(raw: string): string {
   return bestScore >= 0.62 ? bestBank : normalized;
 }
 
-function buildQuote(row: OcrWord[], group: HeaderGroup): BoardQuote | null {
+interface SectionStyle {
+  rating: string;
+  category: string;
+}
+
+// 左侧分组标签 → 评级/看板分类
+function sectionStyle(text: string): SectionStyle | null {
+  if (!text) return null;
+  if (/AA\+/.test(text)) return { rating: 'AA+', category: 'AA+' };
+  if (/AA-/.test(text)) return { rating: 'AA-', category: 'AA-' };
+  if (/国有|股份制|国股|大行/.test(text)) return { rating: 'AAA', category: 'BIG' };
+  if (/AAA/i.test(text)) return { rating: 'AAA', category: 'AAA' };
+  return null;
+}
+
+function buildQuote(row: OcrWord[], group: HeaderGroup, style: SectionStyle | null): BoardQuote | null {
   const sorted = [...row].sort((a, b) => a.left - b.left);
   const minLeft = Number.isFinite(group.low) ? group.low : 0;
 
@@ -366,10 +401,11 @@ function buildQuote(row: OcrWord[], group: HeaderGroup): BoardQuote | null {
   });
   const remarks = cleanRemarks(remarksWords.map(word => word.text).join(''));
 
+  const rating = style?.rating || 'AAA';
   return {
     bankName,
-    rating: 'AAA',
-    category: getCategory(bankName, 'AAA'),
+    rating,
+    category: style?.category || getCategory(bankName, rating),
     tenor: group.tenor,
     yieldRate: yieldValue,
     volume: '',
@@ -391,6 +427,12 @@ export function parseBoard(result: BoardOcrResult | null | undefined): BoardQuot
   const quotes: BoardQuote[] = [];
   const seen = new Set<string>();
 
+  // 左侧评级分组（国有/股份制、AAA、AA+）决定每条报价归到哪一列
+  const sections = (result.sections || []).flatMap(section => {
+    const style = sectionStyle(section.text);
+    return style ? [{ top: section.top, bottom: section.bottom, style }] : [];
+  });
+
   for (const group of groups) {
     const columnWords = bodyWords.filter(word => {
       const x = centerOf(word);
@@ -398,7 +440,9 @@ export function parseBoard(result: BoardOcrResult | null | undefined): BoardQuot
     });
 
     for (const row of groupRows(columnWords)) {
-      const quote = buildQuote(row, group);
+      const rowY = row.reduce((sum, word) => sum + centerY(word), 0) / row.length;
+      const section = sections.find(item => rowY >= item.top && rowY < item.bottom);
+      const quote = buildQuote(row, group, section?.style || null);
       if (!quote) continue;
 
       const key = `${quote.tenor}|${quote.bankName}`;

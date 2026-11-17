@@ -181,18 +181,21 @@ export const VisualCard: React.FC<VisualCardProps> = ({ groupedQuotes, onEditMat
                         </td>
                         <td className={`px-2.5 py-1.5 ${borderRight}`}>
                           {hasItem ? (
-                            <div className={`flex items-center gap-1.5 ${isCondensed ? 'justify-center' : ''}`}>
-                              <span className={`text-[14px] font-black font-mono leading-tight ${isUp ? 'yield-up' : isDown ? 'yield-down' : 'yield-flat'}`}>
-                                {item.yieldRate}
-                              </span>
-                              {item.remarks && (
-                                <span className="text-[9px] text-slate-500 font-medium truncate flex-1" title={item.remarks}>{item.remarks}</span>
-                              )}
-                              {item.volume && (
-                                <span className="text-[8.5px] font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded shrink-0">
-                                  {item.volume}
+                            <div className={`flex items-center ${isCondensed ? 'justify-center' : ''}`}>
+                              {/* 固定宽度的内容块：备注不会把价格挤到别的起始位置 */}
+                              <div className="flex items-center gap-1.5 w-[160px] min-w-0">
+                                <span className={`text-[14px] font-black font-mono leading-tight shrink-0 ${isUp ? 'yield-up' : isDown ? 'yield-down' : 'yield-flat'}`}>
+                                  {item.yieldRate}
                                 </span>
-                              )}
+                                {item.remarks && (
+                                  <span className="text-[9px] text-slate-500 font-medium truncate flex-1 min-w-0" title={item.remarks}>{item.remarks}</span>
+                                )}
+                                {item.volume && (
+                                  <span className="text-[8.5px] font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded shrink-0">
+                                    {item.volume}
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           ) : (
                             <span className="text-[6px] text-slate-100"> </span>

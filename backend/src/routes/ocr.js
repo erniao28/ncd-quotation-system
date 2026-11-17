@@ -96,6 +96,135 @@ function parseTsv(tsv, scale, topOffset = 0) {
   return words;
 }
 
+// ---------- 左侧评级分组（白字蓝底） ----------
+
+const SECTION_LABEL_RE = /国有|股份制|国股|大行|城商|农商|AAA|AA\+|AA-/i;
+const SECTION_BAND_CROP = 140;      // 左侧色带裁剪宽度
+const SECTION_BAND_TEXT_MAX_X = 108; // 色带内文字的右边界，避免把银行名当成分组标签
+
+// 分组之间的分界是贯穿色带的白色分隔线
+function findSectionDividers(rgb, width, height, channels, headerBottom) {
+  const x0 = 3;
+  const x1 = Math.min(100, width);
+  const minWhite = Math.round((x1 - x0) * 0.8);
+  const dividers = [];
+  let runStart = -1;
+
+  for (let y = headerBottom; y < height; y++) {
+    let white = 0;
+    const rowStart = y * width * channels;
+    for (let x = x0; x < x1; x++) {
+      const i = rowStart + x * channels;
+      if (rgb[i] > 235 && rgb[i + 1] > 235 && rgb[i + 2] > 235) white++;
+    }
+    const isDivider = white >= minWhite;
+    if (isDivider && runStart < 0) runStart = y;
+    if ((!isDivider || y === height - 1) && runStart >= 0) {
+      dividers.push(Math.round((runStart + y - 1) / 2));
+      runStart = -1;
+    }
+  }
+
+  return dividers.filter(d => d > headerBottom + 8 && d < height - 8);
+}
+
+// 先找出色带里白字所在的行区间，再逐个裁剪识别（整条窄长色带直接喂 Tesseract 识别不出来）
+function findLabelRows(rgb, width, height, channels, headerBottom) {
+  const x0 = 3;
+  const x1 = Math.min(100, width);
+  const rows = [];
+  let start = -1;
+
+  for (let y = headerBottom; y < height; y++) {
+    let white = 0;
+    const rowStart = y * width * channels;
+    for (let x = x0; x < x1; x++) {
+      const i = rowStart + x * channels;
+      if (rgb[i] > 235 && rgb[i + 1] > 235 && rgb[i + 2] > 235) white++;
+    }
+    const hasText = white >= 6;
+    if (hasText && start < 0) start = y;
+    if ((!hasText || y === height - 1) && start >= 0) {
+      const end = y - 1;
+      const center = (start + end) / 2;
+      if (center > headerBottom + 12 && center < height - 12 && end - start >= 3) {
+        rows.push([start, end]);
+      }
+      start = -1;
+    }
+  }
+
+  return rows;
+}
+
+// 评级分组是白字蓝底，反色后逐行识别，按 y 坐标还原分组位置
+async function recognizeSectionLabels(buffer, width, height, headerBottom, rgb, channels) {
+  const rows = findLabelRows(rgb, width, height, channels, headerBottom);
+  if (rows.length === 0) return [];
+
+  const bandWidth = Math.min(SECTION_BAND_CROP, width);
+  const worker = await getWorker();
+  await worker.setParameters({ tessedit_pageseg_mode: '13', preserve_interword_spaces: '1' });
+
+  const labels = [];
+  for (const [start, end] of rows) {
+    const top = Math.max(0, start - 8);
+    const bottom = Math.min(height, end + 8);
+    const image = await sharp(buffer, { failOn: 'none' })
+      .removeAlpha()
+      .extract({ left: 0, top, width: bandWidth, height: bottom - top })
+      .negate()
+      .grayscale()
+      .normalise()
+      .resize({ width: bandWidth * BOARD_SCALE, kernel: 'lanczos3' })
+      .png()
+      .toBuffer();
+
+    const { data } = await worker.recognize(image, {}, { text: true, tsv: true });
+    const text = parseTsv(data.tsv, 1 / BOARD_SCALE, top)
+      .filter(word => word.left <= SECTION_BAND_TEXT_MAX_X)
+      .map(word => word.text)
+      .join('')
+      .replace(/\s+/g, '');
+
+    if (text && SECTION_LABEL_RE.test(text)) {
+      labels.push({ text, top: start, bottom: end, center: (start + end) / 2 });
+    }
+  }
+
+  return labels;
+}
+
+function buildSections(labels, dividers, headerBottom, height) {
+  if (labels.length === 0) return [];
+  // 整张图只有一个评级标签：说明这块看板本身只属于该评级
+  if (labels.length === 1) {
+    return [{ text: labels[0].text, top: headerBottom, bottom: height }];
+  }
+
+  let bounds = [headerBottom, ...dividers, height];
+  if (bounds.length - 1 < labels.length) {
+    // 没检测到分隔线时退回按标签中心等分
+    const centers = labels.map(label => label.center).sort((a, b) => a - b);
+    bounds = [
+      headerBottom,
+      ...centers.slice(1).map((center, i) => Math.round((centers[i] + center) / 2)),
+      height,
+    ];
+  }
+
+  const sections = [];
+  for (let i = 0; i < bounds.length - 1; i++) {
+    sections.push({ text: '', top: bounds[i], bottom: bounds[i + 1] });
+  }
+  for (const label of labels) {
+    const section = sections.find(item => label.center >= item.top && label.center < item.bottom);
+    if (section) section.text = section.text ? `${section.text} ${label.text}` : label.text;
+  }
+
+  return sections;
+}
+
 // 在原图上取词块颜色，判断收益率标记是红色（↑）还是绿色（↓）
 function sampleWordColor(data, width, height, channels, word) {
   const left = Math.max(0, word.left);
@@ -153,7 +282,7 @@ async function recognizeBoard(buffer) {
     .resize({ width: width * BOARD_SCALE, kernel: 'lanczos3' })
     .grayscale()
     .normalise()
-    .threshold(183)
+    .threshold(210)
     .png()
     .toBuffer();
 
@@ -171,6 +300,10 @@ async function recognizeBoard(buffer) {
     word.color = sampleWordColor(rgb, width, height, info.channels, word);
   }
 
+  const labels = await recognizeSectionLabels(buffer, width, height, headerBottom, rgb, info.channels);
+  const dividers = findSectionDividers(rgb, width, height, info.channels, headerBottom);
+  const sections = buildSections(labels, dividers, headerBottom, height);
+
   return {
     board: true,
     width,
@@ -180,6 +313,7 @@ async function recognizeBoard(buffer) {
     bodyText: bodyResult.data.text || '',
     headerWords,
     bodyWords,
+    sections,
   };
 }
 
