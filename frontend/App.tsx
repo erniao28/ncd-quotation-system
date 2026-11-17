@@ -951,10 +951,12 @@ const App: React.FC = () => {
 
     try {
       // 使用 html2canvas 截取图片
+      // 画布底色跟随页面主题，看板的圆角才不会在白底上消失
+      const pageBg = getComputedStyle(document.body).backgroundColor;
       const canvas = await html2canvas(cardElement, {
         scale: 2,
         useCORS: true,
-        backgroundColor: '#ffffff',
+        backgroundColor: pageBg || '#ffffff',
         scrollX: 0,
         scrollY: 0,
         windowWidth: cardElement.offsetWidth,

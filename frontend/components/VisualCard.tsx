@@ -35,6 +35,12 @@ export const VisualCard: React.FC<VisualCardProps> = ({ groupedQuotes, onEditMat
 
   const tenors = ['1M', '3M', '6M', '9M', '1Y'];
 
+  // 同一类别内按收益率由低到高排列，无法解析的排到最后
+  const rateValue = (rate: string): number => {
+    const value = parseFloat(String(rate).replace(/[↑↓%]/g, ''));
+    return Number.isFinite(value) ? value : Number.POSITIVE_INFINITY;
+  };
+
   // 隐藏列后剩余列会变宽，内容居中避免一侧留白过多
   const isCondensed = categories.length < 3;
 
@@ -90,7 +96,12 @@ export const VisualCard: React.FC<VisualCardProps> = ({ groupedQuotes, onEditMat
           <tbody>
             {tenors.map((tenor) => {
               const group = groupedQuotes.find(g => g.tenor === tenor);
-              const maxRows = Math.max(...categories.map(cat => group?.items.filter(i => i.category === (cat.key as any)).length || 0), 1);
+              const itemsByCategory = categories.map(cat =>
+                (group?.items.filter(i => i.category === (cat.key as any)) || [])
+                  .slice()
+                  .sort((a, b) => rateValue(a.yieldRate) - rateValue(b.yieldRate))
+              );
+              const maxRows = Math.max(...itemsByCategory.map(items => items.length), 1);
               const isLastTenor = tenor === tenors[tenors.length - 1];
 
               return Array.from({ length: maxRows }).map((_, rowIndex) => {
@@ -164,8 +175,7 @@ export const VisualCard: React.FC<VisualCardProps> = ({ groupedQuotes, onEditMat
                     </td>
                   )}
                   {categories.map((cat, catIdx) => {
-                    const items = group?.items.filter(i => i.category === (cat.key as any)) || [];
-                    const item = items[rowIndex];
+                    const item = itemsByCategory[catIdx][rowIndex];
                     const hasItem = !!item;
                     const isUp = hasItem && item.yieldRate.includes('↑');
                     const isDown = hasItem && item.yieldRate.includes('↓');
