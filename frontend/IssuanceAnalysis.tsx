@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { DataChart } from './components/DataChart';
+import { TreemapChart, TreemapBank } from './components/TreemapChart';
 import { DataPanel } from './DataPanel';
 import { fetchIssuanceDates, fetchIssuanceByDate, fetchIssuanceBankCompare, addIssuanceData } from './services/api';
 
@@ -247,21 +248,21 @@ export const IssuanceAnalysis: React.FC<IssuanceAnalysisProps> = ({ sectionId, s
                 <div className="text-center py-8 text-slate-400">暂无数据</div>
               ) : (
                 <>
-                  {/* 汇总卡片 */}
+                  {/* 汇总卡片（统一使用主题色） */}
                   <div className="grid grid-cols-3 gap-4 mb-6">
-                    <div className="bg-indigo-50 rounded-lg p-4">
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
                       <div className="text-xs text-slate-500 mb-1">银行数量</div>
                       <div className="text-2xl font-black text-indigo-700">{dailyStats.length}</div>
                     </div>
-                    <div className="bg-emerald-50 rounded-lg p-4">
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
                       <div className="text-xs text-slate-500 mb-1">发行总笔数</div>
-                      <div className="text-2xl font-black text-emerald-700">
+                      <div className="text-2xl font-black text-indigo-700">
                         {dailyStats.reduce((s, item) => s + item.count, 0)}
                       </div>
                     </div>
-                    <div className="bg-amber-50 rounded-lg p-4">
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
                       <div className="text-xs text-slate-500 mb-1">发行总量 (亿元)</div>
-                      <div className="text-2xl font-black text-amber-700">
+                      <div className="text-2xl font-black text-indigo-700">
                         {dailyStats.reduce((s, item) => s + item.total_volume, 0).toFixed(2)}
                       </div>
                     </div>
@@ -426,9 +427,9 @@ export const IssuanceAnalysis: React.FC<IssuanceAnalysisProps> = ({ sectionId, s
               </button>
             </div>
             {matrixResult ? (
-              <MatrixCards
+              <MatrixTreemap
                 data={matrixResult.banks || []}
-                prevPeriod={matrixResult.prev_period || null}
+                period={matrixResult.period || null}
               />
             ) : (
               <div className="text-center py-12 text-slate-400">请选择日期范围后查询</div>
@@ -440,7 +441,7 @@ export const IssuanceAnalysis: React.FC<IssuanceAnalysisProps> = ({ sectionId, s
   );
 };
 
-// ===== 矩阵图（类别卡片网格，每组多行） =====
+// ===== 矩阵图（矩形树图：面积 = 发行量，颜色 = 净发行 vs 每日到期） =====
 
 // 银行归类
 function categorizeBank(rawName: string): string {
@@ -467,79 +468,61 @@ function categorizeBank(rawName: string): string {
   return '城商行';
 }
 
-const MatrixCards: React.FC<{
-  data: Array<{ bank_name: string; total_volume: number; change_pct: number | null }>;
-  prevPeriod: { start: string; end: string } | null;
-}> = ({ data, prevPeriod }) => {
-  // 分组
-  const groups: Record<string, typeof data> = {};
-  for (const bank of data) {
-    const cat = categorizeBank(bank.bank_name);
-    if (!groups[cat]) groups[cat] = [];
-    groups[cat].push(bank);
-  }
+const MatrixTreemap: React.FC<{
+  data: Array<{
+    bank_name: string;
+    total_volume: number;
+    maturity_volume: number;
+    net_volume: number;
+  }>;
+  period: { start: string; end: string } | null;
+}> = ({ data, period }) => {
+  // 按银行类别分组，组内按发行量降序
+  const groups = useMemo(() => {
+    const map: Record<string, TreemapBank[]> = {};
+    for (const bank of data) {
+      const category = categorizeBank(bank.bank_name);
+      if (!map[category]) map[category] = [];
+      map[category].push({
+        key: bank.bank_name,
+        label: bank.bank_name.replace(/^26/, ''),
+        value: bank.total_volume,
+        issueVolume: bank.total_volume,
+        maturityVolume: bank.maturity_volume || 0,
+        netVolume: bank.net_volume || 0
+      });
+    }
+    return Object.entries(map).map(([category, banks]) => ({
+      key: category,
+      label: `${category} · ${banks.reduce((sum, bank) => sum + bank.value, 0).toFixed(0)}亿`,
+      banks
+    }));
+  }, [data]);
 
-  // 组内按发行量降序，组间按最大银行发行量降序
-  const categoryList = Object.entries(groups)
-    .map(([category, banks]) => {
-      banks.sort((a, b) => b.total_volume - a.total_volume);
-      return {
-        category,
-        max_volume: banks[0]?.total_volume || 0,
-        banks,
-      };
-    })
-    .sort((a, b) => b.max_volume - a.max_volume);
+  const totals = useMemo(() => {
+    const issue = data.reduce((s, b) => s + b.total_volume, 0);
+    const maturity = data.reduce((s, b) => s + (b.maturity_volume || 0), 0);
+    return { issue, maturity, net: issue - maturity };
+  }, [data]);
 
   return (
     <div>
       {/* 对比信息 */}
-      <div className="flex items-center justify-between mb-4">
-        <span className="text-sm text-slate-400">
-          共 {data.length} 家银行，分 {categoryList.length} 个类别
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <span className="text-sm text-slate-500">
+          共 {data.length} 家银行，分 {groups.length} 个类别
         </span>
-        {prevPeriod && (
-          <span className="text-xs text-slate-500">
-            对比周期：{prevPeriod.start} ~ {prevPeriod.end}
-          </span>
-        )}
+        <span className="text-xs text-slate-500">
+          {period ? `${period.start} ~ ${period.end} · ` : ''}
+          发行 <b className="text-slate-700">{totals.issue.toFixed(1)}</b> 亿
+          / 到期 <b className="text-slate-700">{totals.maturity.toFixed(1)}</b> 亿
+          / 净发行 <b className={totals.net >= 0 ? 'text-red-600' : 'text-emerald-600'}>
+            {totals.net >= 0 ? '+' : ''}{totals.net.toFixed(1)}
+          </b> 亿
+        </span>
       </div>
 
-      {categoryList.length === 0 ? (
-        <div className="text-center py-12 text-slate-400">所选日期范围内无数据</div>
-      ) : (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          {categoryList.map(cat => (
-            <div
-              key={cat.category}
-              className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl border border-slate-700/50 shadow-lg overflow-hidden"
-            >
-              {/* 类别标题 */}
-              <div className="px-4 py-2.5 bg-slate-800/90 border-b border-slate-700/50">
-                <span className="text-base font-bold text-white">{cat.category}</span>
-              </div>
-              {/* 银行列表 */}
-              <div className="px-4 py-3 space-y-2.5">
-                {cat.banks.map(bank => (
-                  <div key={bank.bank_name} className="flex items-center justify-between">
-                    <span className="text-sm text-slate-200 truncate mr-2">{bank.bank_name}</span>
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      <span className="text-sm font-bold text-cyan-300">{bank.total_volume.toFixed(1)}亿</span>
-                      {bank.change_pct !== null && (
-                        <span className={`text-xs font-bold ${
-                          bank.change_pct >= 0 ? 'text-red-400' : 'text-green-400'
-                        }`}>
-                          {bank.change_pct >= 0 ? '▲' : '▼'}{Math.abs(bank.change_pct).toFixed(1)}%
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+      <TreemapChart groups={groups} />
     </div>
   );
 };

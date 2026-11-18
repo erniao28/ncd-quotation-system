@@ -771,40 +771,71 @@ function getIssuanceByBank(startDate, endDate) {
   return results;
 }
 
-// 获取银行发行量对比（含环比变化%）
+// 把发行量里的简称和 DM 到期里的全称归一，便于匹配同一家银行
+// 例：26建设银行 / 中国建设银行股份有限公司 → 建设银行
+function normalizeBankKey(name) {
+  return String(name || '')
+    .replace(/^\d+/, '')
+    .replace(/[（(].*?[)）]/g, '')
+    .replace(/股份有限公司|有限责任公司|有限公司/g, '')
+    .replace(/^中国/, '')
+    .replace(/^邮储/, '邮政储蓄')
+    .replace(/^浦发/, '上海浦东发展')
+    .replace(/农村商业银行|农商银行|农商行/g, '农商')
+    .replace(/农村合作银行|农合银行/g, '农合')
+    .replace(/\s/g, '')
+    .trim();
+}
+
+// 区间内按银行汇总到期量（ncd_issuance = DM 抓取的存单发行记录，按到期日聚合）
+function getNcdMaturityBankTotals(startDate, endDate) {
+  const stmt = db.prepare(`
+    SELECT COALESCE(issuer_name, sec_name, '未知') as bank_name, SUM(amount) as amount
+    FROM ncd_issuance
+    WHERE maturity_date >= ? AND maturity_date <= ?
+      AND (issue_status IS NULL OR issue_status != 3)
+    GROUP BY bank_name
+  `);
+  stmt.bind([startDate, endDate]);
+  const rows = [];
+  while (stmt.step()) rows.push(stmt.getAsObject());
+  stmt.free();
+  return rows;
+}
+
+// 把到期量匹配到发行银行上：先精确，再互相包含（覆盖「微众银行 / 前海微众银行」这类简称差）
+function matchMaturityToBanks(banks, maturityRows) {
+  const rows = maturityRows.map(r => ({ key: normalizeBankKey(r.bank_name), amount: r.amount || 0 }));
+  const out = {};
+  for (const b of banks) {
+    const key = normalizeBankKey(b.bank_name);
+    let amount = 0;
+    for (const r of rows) {
+      if (r.key && (r.key === key || r.key.includes(key) || key.includes(r.key))) amount += r.amount;
+    }
+    out[b.bank_name] = amount;
+  }
+  return out;
+}
+
+// 银行发行量 vs 每日到期：净发行 = 区间发行量 − 区间到期量
 function getIssuanceBankCompare(startDate, endDate) {
   const current = getIssuanceByBank(startDate, endDate);
-
-  // 计算上一期（相同天数的前一周期）
-  const start = new Date(startDate + 'T00:00:00');
-  const end = new Date(endDate + 'T00:00:00');
-  const diffDays = Math.round((end - start) / 86400000);
-  const prevEnd = new Date(start.getTime() - 86400000);
-  const prevStart = new Date(prevEnd.getTime() - diffDays * 86400000);
-  const fmt = (d) => d.toISOString().slice(0, 10);
-
-  // 获取上一期数据
-  const previous = getIssuanceByBank(fmt(prevStart), fmt(prevEnd));
-  const prevMap = {};
-  for (const p of previous) {
-    prevMap[p.bank_name] = p.total_volume;
-  }
+  const maturityTotals = matchMaturityToBanks(current, getNcdMaturityBankTotals(startDate, endDate));
 
   return {
+    period: { start: startDate, end: endDate },
     banks: current.map(item => {
-      const prevVol = prevMap[item.bank_name] || 0;
-      const changePct = prevVol > 0
-        ? Math.round(((item.total_volume - prevVol) / prevVol) * 1000) / 10
-        : null;
+      const totalVolume = +(item.total_volume || 0).toFixed(2);
+      const maturityVolume = +(maturityTotals[item.bank_name] || 0).toFixed(2);
       return {
         bank_name: item.bank_name,
         count: item.count,
-        total_volume: item.total_volume,
-        prev_volume: prevVol,
-        change_pct: changePct
+        total_volume: totalVolume,
+        maturity_volume: maturityVolume,
+        net_volume: +(totalVolume - maturityVolume).toFixed(2)
       };
-    }),
-    prev_period: { start: fmt(prevStart), end: fmt(prevEnd) }
+    })
   };
 }
 

@@ -25,7 +25,7 @@ import {
 } from './services/api';
 import html2canvas from 'html2canvas';
 
-const APP_VERSION = '20261117'; // 版本号：YYYYMMDD 格式
+const APP_VERSION = '20261118'; // 版本号：YYYYMMDD 格式
 
 // 看板图片可选的类别列（顺序固定）
 const BOARD_CATEGORY_OPTIONS = [

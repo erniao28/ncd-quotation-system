@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
@@ -15,17 +15,58 @@ interface DataChartProps {
   chartType?: 'line' | 'bar' | 'pie';
   title?: string;
   colors?: string[];
+  showTooltip?: boolean;
 }
 
-const COLORS = ['#4f46e5', '#06b6d4', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#6366f1'];
+// 图表颜色跟随主题变量，皮肤切换时重读
+const readVar = (name: string, fallback: string): string => {
+  if (typeof window === 'undefined') return fallback;
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value || fallback;
+};
+
+const useThemeVars = () => {
+  const [, setTick] = useState(0);
+
+  useEffect(() => {
+    const observer = new MutationObserver(() => setTick(tick => tick + 1));
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => observer.disconnect();
+  }, []);
+
+  return {
+    accent: readVar('--accent', '#f0b429'),
+    accentStrong: readVar('--accent-strong', '#a87303'),
+    accentSoft: readVar('--accent-soft', '#fdf3da'),
+    ink: readVar('--ink', '#141414'),
+    ink2: readVar('--ink-2', '#5f5a50'),
+    ink3: readVar('--ink-3', '#8b8578'),
+    line: readVar('--line', '#e9e4d9'),
+    surface: readVar('--surface', '#ffffff'),
+    up: readVar('--up', '#c0362c'),
+    down: readVar('--down', '#1e7a4f'),
+  };
+};
 
 export const DataChart: React.FC<DataChartProps> = ({
   data,
   chartType = 'bar',
   title,
-  colors = COLORS
+  colors,
+  showTooltip = true
 }) => {
   const [activeChart, setActiveChart] = useState<'line' | 'bar' | 'pie'>(chartType);
+  const theme = useThemeVars();
+
+  const palette = colors || [
+    theme.accent,
+    theme.ink2,
+    theme.up,
+    theme.down,
+    theme.ink3,
+    theme.accentStrong,
+    theme.line
+  ];
 
   if (!data || data.length === 0) {
     return (
@@ -35,6 +76,16 @@ export const DataChart: React.FC<DataChartProps> = ({
       </div>
     );
   }
+
+  const axisStyle = { fontSize: 12, fill: theme.ink3 };
+  const tooltipStyle = {
+    backgroundColor: theme.surface,
+    border: `1px solid ${theme.line}`,
+    borderRadius: '8px',
+    fontSize: '12px',
+    color: theme.ink
+  };
+  const tooltipTextStyle = { color: theme.ink2 };
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 p-4">
@@ -71,43 +122,28 @@ export const DataChart: React.FC<DataChartProps> = ({
         <ResponsiveContainer width="100%" height="100%">
           {activeChart === 'line' && (
             <LineChart data={data}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="name" stroke="#64748b" fontSize={12} />
-              <YAxis stroke="#64748b" fontSize={12} />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: '#fff',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '8px',
-                  fontSize: '12px'
-                }}
-              />
-              <Legend />
+              <CartesianGrid strokeDasharray="3 3" stroke={theme.line} />
+              <XAxis dataKey="name" stroke={theme.ink3} tick={axisStyle} />
+              <YAxis stroke={theme.ink3} tick={axisStyle} />
+              {showTooltip && <Tooltip contentStyle={tooltipStyle} itemStyle={tooltipTextStyle} labelStyle={tooltipTextStyle} />}
               <Line
                 type="monotone"
                 dataKey="value"
-                stroke={colors[0]}
+                stroke={theme.accent}
                 strokeWidth={2}
-                dot={{ fill: colors[0], strokeWidth: 2 }}
+                dot={{ fill: theme.accent, strokeWidth: 2 }}
+                isAnimationActive={false}
               />
             </LineChart>
           )}
 
           {activeChart === 'bar' && (
             <BarChart data={data}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="name" stroke="#64748b" fontSize={12} />
-              <YAxis stroke="#64748b" fontSize={12} />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: '#fff',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '8px',
-                  fontSize: '12px'
-                }}
-              />
-              <Legend />
-              <Bar dataKey="value" fill={colors[0]} radius={[4, 4, 0, 0]} />
+              <CartesianGrid strokeDasharray="3 3" stroke={theme.line} />
+              <XAxis dataKey="name" stroke={theme.ink3} tick={axisStyle} />
+              <YAxis stroke={theme.ink3} tick={axisStyle} />
+              {showTooltip && <Tooltip contentStyle={tooltipStyle} itemStyle={tooltipTextStyle} labelStyle={tooltipTextStyle} />}
+              <Bar dataKey="value" fill={theme.accent} radius={[4, 4, 0, 0]} isAnimationActive={false} />
             </BarChart>
           )}
 
@@ -124,18 +160,11 @@ export const DataChart: React.FC<DataChartProps> = ({
                 labelLine={false}
               >
                 {data.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />
+                  <Cell key={`cell-${index}`} fill={palette[index % palette.length]} />
                 ))}
               </Pie>
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: '#fff',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '8px',
-                  fontSize: '12px'
-                }}
-              />
-              <Legend />
+              {showTooltip && <Tooltip contentStyle={tooltipStyle} itemStyle={tooltipTextStyle} labelStyle={tooltipTextStyle} />}
+              <Legend wrapperStyle={{ color: theme.ink2, fontSize: 12 }} />
             </PieChart>
           )}
         </ResponsiveContainer>
