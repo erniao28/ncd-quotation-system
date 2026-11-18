@@ -980,12 +980,35 @@ const App: React.FC = () => {
         }
       });
 
+      // html2canvas 不会按父元素圆角裁剪子元素，导出图会变成直角；
+      // 这里按看板的 CSS 圆角把整张图裁一次，圆角外留透明
+      const cssRadius = parseFloat(getComputedStyle(cardElement).borderTopLeftRadius) || 0;
+      const radius = cssRadius * (canvas.width / cardElement.offsetWidth);
+      const rounded = document.createElement('canvas');
+      rounded.width = canvas.width;
+      rounded.height = canvas.height;
+      const ctx = rounded.getContext('2d');
+      let output = canvas;
+      if (ctx && radius > 0) {
+        const r = Math.min(radius, rounded.width / 2, rounded.height / 2);
+        ctx.beginPath();
+        ctx.moveTo(r, 0);
+        ctx.arcTo(rounded.width, 0, rounded.width, rounded.height, r);
+        ctx.arcTo(rounded.width, rounded.height, 0, rounded.height, r);
+        ctx.arcTo(0, rounded.height, 0, 0, r);
+        ctx.arcTo(0, 0, rounded.width, 0, r);
+        ctx.closePath();
+        ctx.clip();
+        ctx.drawImage(canvas, 0, 0);
+        output = rounded;
+      }
+
       // 转换为 base64 用于预览
-      const dataUrl = canvas.toDataURL('image/png');
+      const dataUrl = output.toDataURL('image/png');
       setPreviewImage(dataUrl);
 
       // 同时尝试复制到剪贴板
-      canvas.toBlob(async (blob) => {
+      output.toBlob(async (blob) => {
         if (!blob) return;
         try {
           if (navigator.clipboard && navigator.clipboard.write) {
