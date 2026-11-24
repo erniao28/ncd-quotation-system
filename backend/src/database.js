@@ -751,18 +751,51 @@ function getNcdMaturityDates() {
   return results;
 }
 
-// 按银行统计发行量（指定日期范围内）
-function getIssuanceByBank(startDate, endDate) {
+// 按银行统计发行量（指定日期范围内，可按银行名模糊筛选）
+function getIssuanceByBank(startDate, endDate, bank) {
+  const params = [startDate, endDate];
+  let bankClause = '';
+  if (bank) {
+    bankClause = ' AND bank_name LIKE ?';
+    params.push(`%${bank}%`);
+  }
   const stmt = db.prepare(`
     SELECT bank_name,
            COUNT(*) as count,
            SUM(CAST(REPLACE(REPLACE(volume, '亿元', ''), '亿', '') AS REAL) || 0) as total_volume
     FROM temp_quotes
-    WHERE issue_date >= ? AND issue_date <= ?
+    WHERE issue_date >= ? AND issue_date <= ?${bankClause}
     GROUP BY bank_name
     ORDER BY total_volume DESC
   `);
-  stmt.bind([startDate, endDate]);
+  stmt.bind(params);
+  const results = [];
+  while (stmt.step()) {
+    results.push(stmt.getAsObject());
+  }
+  stmt.free();
+  return results;
+}
+
+// 按日期汇总发行量（区间汇总用，可按银行名模糊筛选）
+function getIssuanceDailySummary(startDate, endDate, bank) {
+  const params = [startDate, endDate];
+  let bankClause = '';
+  if (bank) {
+    bankClause = ' AND bank_name LIKE ?';
+    params.push(`%${bank}%`);
+  }
+  const stmt = db.prepare(`
+    SELECT issue_date as date,
+           SUM(CAST(REPLACE(REPLACE(volume, '亿元', ''), '亿', '') AS REAL)) as total_volume,
+           COUNT(*) as total_count,
+           COUNT(DISTINCT bank_name) as bank_count
+    FROM temp_quotes
+    WHERE issue_date >= ? AND issue_date <= ?${bankClause}
+    GROUP BY issue_date
+    ORDER BY issue_date ASC
+  `);
+  stmt.bind(params);
   const results = [];
   while (stmt.step()) {
     results.push(stmt.getAsObject());
@@ -1109,6 +1142,7 @@ export {
   getIssuanceByDate,
   getAvailableIssueDates,
   getIssuanceByBank,
+  getIssuanceDailySummary,
   getIssuanceBankCompare,
   getMonthlyStats,
   syncIssuanceData,

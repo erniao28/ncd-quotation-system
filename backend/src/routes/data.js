@@ -16,6 +16,7 @@ import {
   getIssuanceByDate,
   getAvailableIssueDates,
   getIssuanceByBank,
+  getIssuanceDailySummary,
   getIssuanceBankCompare,
   getMonthlyStats,
   syncIssuanceData,
@@ -251,18 +252,32 @@ router.get('/issuance/:date', (req, res) => {
   }
 });
 
-// 获取银行统计（日期范围）
+// 获取银行统计（日期范围，可按银行名模糊筛选）
 router.get('/issuance/stats/bank', (req, res) => {
   try {
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, bank } = req.query;
     if (!startDate || !endDate) {
       return res.status(400).json({ error: '缺少日期参数' });
     }
-    const data = getIssuanceByBank(startDate, endDate);
+    const data = getIssuanceByBank(startDate, endDate, bank || null);
     res.json(data);
   } catch (error) {
     console.error('[API] 获取银行统计失败:', error);
     res.status(500).json({ error: '获取银行统计失败' });
+  }
+});
+
+// 按日期汇总发行量（区间汇总用，可按银行名模糊筛选）
+router.get('/issuance/stats/daily', (req, res) => {
+  try {
+    const { startDate, endDate, bank } = req.query;
+    if (!startDate || !endDate) {
+      return res.status(400).json({ error: '缺少日期参数' });
+    }
+    res.json(getIssuanceDailySummary(startDate, endDate, bank || null));
+  } catch (error) {
+    console.error('[API] 获取发行量按日汇总失败:', error);
+    res.status(500).json({ error: '获取按日汇总失败' });
   }
 });
 

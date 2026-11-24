@@ -279,6 +279,22 @@ export async function fetchIssuanceMatrix(startDate, endDate) {
   return res.json();
 }
 
+export async function fetchIssuanceBankStats(startDate, endDate, bank) {
+  const qs = new URLSearchParams({ startDate, endDate });
+  if (bank) qs.set('bank', bank);
+  const res = await fetch(`${API_BASE}/data/issuance/stats/bank?${qs.toString()}`);
+  if (!res.ok) throw new Error('获取银行统计失败');
+  return res.json();
+}
+
+export async function fetchIssuanceDailySummary(startDate, endDate, bank) {
+  const qs = new URLSearchParams({ startDate, endDate });
+  if (bank) qs.set('bank', bank);
+  const res = await fetch(`${API_BASE}/data/issuance/stats/daily?${qs.toString()}`);
+  if (!res.ok) throw new Error('获取发行量按日汇总失败');
+  return res.json();
+}
+
 export async function fetchIssuanceBankCompare(startDate, endDate) {
   const res = await fetch(`${API_BASE}/data/issuance/stats/compare?startDate=${startDate}&endDate=${endDate}`);
   if (!res.ok) throw new Error('获取银行对比数据失败');

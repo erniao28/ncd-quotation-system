@@ -25,7 +25,7 @@ import {
 } from './services/api';
 import html2canvas from 'html2canvas';
 
-const APP_VERSION = '20261118'; // 版本号：YYYYMMDD 格式
+const APP_VERSION = '20261124'; // 版本号：YYYYMMDD 格式
 
 // 看板图片可选的类别列（顺序固定）
 const BOARD_CATEGORY_OPTIONS = [
@@ -103,6 +103,7 @@ const App: React.FC = () => {
   const imageInputRef = useRef<HTMLInputElement>(null);
   const [isOcrRunning, setIsOcrRunning] = useState(false);
   const [ocrStatus, setOcrStatus] = useState('');
+  const [ocrWarnings, setOcrWarnings] = useState<string[]>([]);
 
   // 双击编辑模式 - 记录哪个 ID 处于编辑状态
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -266,7 +267,8 @@ const App: React.FC = () => {
     setMaturityInput('');
   };
 
-  // 同一「银行+期限」只保留一条：后出现的覆盖先出现的（看板识别结果排在最后，优先）
+  // 同一「银行+期限+收益率」只保留一条：后出现的覆盖先出现的（看板识别结果排在最后，优先）
+  // 收益率要进 key：同一银行同一期限可能挂两条不同收益率的报价（如 1Y 1.43 / 1.415）
   const dedupeRecognizedQuotes = (list: Partial<Quotation>[]) => {
     const keyed = new Map<string, Partial<Quotation>>();
     const rest: Partial<Quotation>[] = [];
@@ -275,7 +277,7 @@ const App: React.FC = () => {
         rest.push(q);
         continue;
       }
-      keyed.set(`${q.tenor}|${q.bankName}`, q);
+      keyed.set(`${q.tenor}|${q.bankName}|${q.yieldRate || ''}`, q);
     }
     return [...keyed.values(), ...rest];
   };
@@ -337,9 +339,11 @@ const App: React.FC = () => {
     if (images.length === 0 || isOcrRunning) return;
 
     setIsOcrRunning(true);
+    setOcrWarnings([]);
     try {
       const texts: string[] = [];
       const boardQuotes: Partial<Quotation>[] = [];
+      const boardWarnings: string[] = [];
 
       for (let i = 0; i < images.length; i++) {
         setOcrStatus(`正在识别图片 ${i + 1}/${images.length}`);
@@ -354,6 +358,7 @@ const App: React.FC = () => {
             const quotes = parseBoard(result);
             if (quotes.length > 0) {
               boardQuotes.push(...(quotes as Partial<Quotation>[]));
+              boardWarnings.push(...(result.warnings || []));
               continue;
             }
           } catch (error) {
@@ -376,6 +381,7 @@ const App: React.FC = () => {
           : [];
         setRecognizedQuotes(dedupeRecognizedQuotes([...existingQuotes, ...textQuotes, ...boardQuotes]));
         setInputText(prev => [prev.trim(), recognizedText].filter(Boolean).join('\n'));
+        setOcrWarnings(Array.from(new Set(boardWarnings)));
         return;
       }
 
@@ -1646,6 +1652,13 @@ const App: React.FC = () => {
               handleImageFiles(files);
             }}
           />
+          {ocrWarnings.length > 0 && (
+            <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-600">
+              {ocrWarnings.map((warning, i) => (
+                <div key={i}>· {warning}</div>
+              ))}
+            </div>
+          )}
           <div className="flex justify-end gap-2 mt-3">
             <button
               disabled={isParsing || isOcrRunning}

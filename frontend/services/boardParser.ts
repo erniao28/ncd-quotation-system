@@ -28,6 +28,7 @@ export interface BoardOcrResult {
   headerWords?: OcrWord[];
   bodyWords?: OcrWord[];
   sections?: BoardSection[];
+  warnings?: string[];
 }
 
 export interface BoardQuote {
@@ -75,6 +76,7 @@ const EXTRA_BOARD_BANKS = [
   '中山农商行', '福建海峡银行', '广东南粤银行', '长城华西银行',
   '四川天府银行', '绵阳市商业银行', '天津滨海农村商行', '浙江绍兴瑞丰农商行',
   '四川银行', '江门农商银行', '宜宾市商业银行',
+  '稠州银行', '海南银行', '乐清农商银行', '张家口银行',
 ];
 
 const BANK_CANDIDATES = Array.from(new Set([...BANKS, ...EXTRA_BOARD_BANKS]));
@@ -109,6 +111,8 @@ const NAME_FIXES: Array<[RegExp, string]> = [
   [/国乐/g, '国际'],
   [/华闵/g, '华兴'],
   [/照殷/g, '日照'],
+  [/稀州/g, '稠州'],
+  [/上虚/g, '上虞'],
   [/江天/g, '江西'],
   [/过海|再海/g, '南海'],
   [/江商/g, '江南'],
@@ -445,7 +449,8 @@ export function parseBoard(result: BoardOcrResult | null | undefined): BoardQuot
       const quote = buildQuote(row, group, section?.style || null);
       if (!quote) continue;
 
-      const key = `${quote.tenor}|${quote.bankName}`;
+      // 同一银行同一期限可能挂两条报价（如上海银行 1Y 1.43 / 1.415），key 必须带上收益率
+      const key = `${quote.tenor}|${quote.bankName}|${quote.yieldRate}|${quote.rating}`;
       if (seen.has(key)) continue;
       seen.add(key);
       quotes.push(quote);

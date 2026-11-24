@@ -102,6 +102,54 @@ const SECTION_LABEL_RE = /国有|股份制|国股|大行|城商|农商|AAA|AA\+|
 const SECTION_BAND_CROP = 140;      // 左侧色带裁剪宽度
 const SECTION_BAND_TEXT_MAX_X = 108; // 色带内文字的右边界，避免把银行名当成分组标签
 
+// “AAA+”/“AAAA” 这类结果其实就是 AA+（评级里不存在 AAA+），OCR 常把 + 前面多认一个 A
+function normalizeSectionText(raw) {
+  const text = (raw || '').replace(/\s+/g, '');
+  if (!text) return '';
+  if (/A{2,}\+/.test(text)) return 'AA+';
+  if (/A{2,}-/.test(text)) return 'AA-';
+  if (/AAA/i.test(text)) return 'AAA';
+  return text;
+}
+
+// 色带标签字号小，中文常被认花（如“国有/股份制”→“习有/用份制”），用词典做模糊匹配
+const SECTION_VOCAB = ['国有/股份制', '国有大行', '股份制', '国股', '大行', '城商行', '农商行', '民营银行', '外资银行', '政策性银行'];
+
+function editDistance(a, b) {
+  const rows = a.length + 1;
+  const cols = b.length + 1;
+  const dp = Array.from({ length: rows }, () => new Array(cols).fill(0));
+  for (let i = 0; i < rows; i++) dp[i][0] = i;
+  for (let j = 0; j < cols; j++) dp[0][j] = j;
+  for (let i = 1; i < rows; i++) {
+    for (let j = 1; j < cols; j++) {
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
+      );
+    }
+  }
+  return dp[rows - 1][cols - 1];
+}
+
+function matchSectionLabel(raw) {
+  const text = normalizeSectionText(raw);
+  if (!text) return '';
+  if (SECTION_LABEL_RE.test(text)) return text;
+
+  let best = '';
+  let bestScore = 0;
+  for (const word of SECTION_VOCAB) {
+    const score = 1 - editDistance(text, word) / Math.max(text.length, word.length);
+    if (score > bestScore) {
+      bestScore = score;
+      best = word;
+    }
+  }
+  return bestScore >= 0.55 ? best : '';
+}
+
 // 分组之间的分界是贯穿色带的白色分隔线
 function findSectionDividers(rgb, width, height, channels, headerBottom) {
   const x0 = 3;
@@ -164,30 +212,93 @@ async function recognizeSectionLabels(buffer, width, height, headerBottom, rgb, 
 
   const bandWidth = Math.min(SECTION_BAND_CROP, width);
   const worker = await getWorker();
-  await worker.setParameters({ tessedit_pageseg_mode: '13', preserve_interword_spaces: '1' });
-
   const labels = [];
-  for (const [start, end] of rows) {
-    const top = Math.max(0, start - 8);
-    const bottom = Math.min(height, end + 8);
-    const image = await sharp(buffer, { failOn: 'none' })
+
+  const recognizeImage = async (top, image, scale = BOARD_SCALE) => {
+    // 单行模式逐块识别；+ / - 和中文类别名都可能在标签里
+    await worker.setParameters({
+      tessedit_pageseg_mode: '7',
+      preserve_interword_spaces: '1',
+      tessedit_char_whitelist: '',
+    });
+    const { data } = await worker.recognize(image, {}, { text: true, tsv: true });
+    return parseTsv(data.tsv, 1 / scale, top)
+      .filter(word => word.left <= SECTION_BAND_TEXT_MAX_X)
+      .map(word => word.text)
+      .join('')
+      .replace(/\s+/g, '');
+  };
+
+  const fullCrop = async (top, bottom, whitelist) => {
+    const pipeline = sharp(buffer, { failOn: 'none' })
       .removeAlpha()
       .extract({ left: 0, top, width: bandWidth, height: bottom - top })
       .negate()
       .grayscale()
       .normalise()
-      .resize({ width: bandWidth * BOARD_SCALE, kernel: 'lanczos3' })
-      .png()
-      .toBuffer();
-
+      .resize({ width: bandWidth * BOARD_SCALE, kernel: 'lanczos3' });
+    const image = await pipeline.png().toBuffer();
+    if (!whitelist) return recognizeImage(top, image);
+    await worker.setParameters({
+      tessedit_pageseg_mode: '7',
+      preserve_interword_spaces: '1',
+      tessedit_char_whitelist: whitelist,
+    });
     const { data } = await worker.recognize(image, {}, { text: true, tsv: true });
-    const text = parseTsv(data.tsv, 1 / BOARD_SCALE, top)
+    return parseTsv(data.tsv, 1 / BOARD_SCALE, top)
       .filter(word => word.left <= SECTION_BAND_TEXT_MAX_X)
       .map(word => word.text)
       .join('')
       .replace(/\s+/g, '');
+  };
 
-    if (text && SECTION_LABEL_RE.test(text)) {
+  // “AA+”的加号笔画太细，常规预处理经常丢掉；高倍放大+二值化能稳定保住加号
+  const tightCrop = async (start, end, whitelist) => {
+    const left = 4;
+    const cropWidth = Math.min(76, width - left);
+    const top = Math.max(0, start - 6);
+    const bottom = Math.min(height, end + 6);
+    const image = await sharp(buffer, { failOn: 'none' })
+      .removeAlpha()
+      .extract({ left, top, width: cropWidth, height: bottom - top })
+      .grayscale()
+      .resize({ width: cropWidth * 12, kernel: 'lanczos3' })
+      .normalise()
+      .threshold(235)
+      .negate()
+      .extend({ top: 12, bottom: 12, left: 12, right: 12, background: '#ffffff' })
+      .png()
+      .toBuffer();
+    if (!whitelist) return recognizeImage(top, image, 12);
+
+    await worker.setParameters({
+      tessedit_pageseg_mode: '7',
+      preserve_interword_spaces: '1',
+      tessedit_char_whitelist: whitelist,
+    });
+    const { data } = await worker.recognize(image, {}, { text: true, tsv: true });
+    return parseTsv(data.tsv, 1 / 12, top)
+      .filter(word => word.left <= SECTION_BAND_TEXT_MAX_X)
+      .map(word => word.text)
+      .join('')
+      .replace(/\s+/g, '');
+  };
+
+  for (const [start, end] of rows) {
+    const top = Math.max(0, start - 8);
+    const bottom = Math.min(height, end + 8);
+
+    const candidates = [
+      await fullCrop(top, bottom, ''),
+      await fullCrop(top, bottom, 'AA+ -国有股大行份制城农商金'),
+      await tightCrop(start, end, ''),
+      await tightCrop(start, end, 'AA+-'),
+    ].map(matchSectionLabel).filter(Boolean);
+
+    // 带 +/- 的结果优先（AA+ / AA-），避免把加号丢掉后误判成 AAA
+    const text = candidates.find(item => /AA[+-]/.test(item)) || candidates[0];
+    if (process.env.OCR_DEBUG) console.log('[OCR] label row', start, end, 'candidates:', JSON.stringify(candidates));
+    if (text) {
       labels.push({ text, top: start, bottom: end, center: (start + end) / 2 });
     }
   }
@@ -196,30 +307,31 @@ async function recognizeSectionLabels(buffer, width, height, headerBottom, rgb, 
 }
 
 function buildSections(labels, dividers, headerBottom, height) {
-  if (labels.length === 0) return [];
-  // 整张图只有一个评级标签：说明这块看板本身只属于该评级
-  if (labels.length === 1) {
-    return [{ text: labels[0].text, top: headerBottom, bottom: height }];
-  }
-
-  let bounds = [headerBottom, ...dividers, height];
-  if (bounds.length - 1 < labels.length) {
-    // 没检测到分隔线时退回按标签中心等分
-    const centers = labels.map(label => label.center).sort((a, b) => a - b);
-    bounds = [
-      headerBottom,
-      ...centers.slice(1).map((center, i) => Math.round((centers[i] + center) / 2)),
-      height,
-    ];
-  }
-
+  // 按分隔线切段；太窄的碎条一般是底边框，丢弃
+  const bounds = [headerBottom, ...dividers, height];
   const sections = [];
   for (let i = 0; i < bounds.length - 1; i++) {
-    sections.push({ text: '', top: bounds[i], bottom: bounds[i + 1] });
+    if (bounds[i + 1] - bounds[i] >= 40) {
+      sections.push({ text: '', top: bounds[i], bottom: bounds[i + 1] });
+    }
   }
+  if (sections.length === 0) sections.push({ text: '', top: headerBottom, bottom: height });
+
   for (const label of labels) {
     const section = sections.find(item => label.center >= item.top && label.center < item.bottom);
     if (section) section.text = section.text ? `${section.text} ${label.text}` : label.text;
+  }
+
+  // 两段看板只认出一个标签时，按评级自上而下由高到低的惯例推断另一段
+  if (sections.length === 2) {
+    const [top, bottom] = sections;
+    if (top.text && !bottom.text && !/AA\+|AA-/.test(top.text)) {
+      bottom.text = 'AA+';
+      bottom.inferred = true;
+    } else if (bottom.text && !top.text && /AA\+|AA-/.test(bottom.text)) {
+      top.text = 'AAA';
+      top.inferred = true;
+    }
   }
 
   return sections;
@@ -288,11 +400,19 @@ async function recognizeBoard(buffer) {
 
   const worker = await getWorker();
 
-  await worker.setParameters({ tessedit_pageseg_mode: '3', preserve_interword_spaces: '1' });
+  await worker.setParameters({
+    tessedit_pageseg_mode: '3',
+    preserve_interword_spaces: '1',
+    tessedit_char_whitelist: '',
+  });
   const headerResult = await worker.recognize(headerImage, {}, { text: true, tsv: true });
   const headerWords = parseTsv(headerResult.data.tsv, 1 / BOARD_SCALE);
 
-  await worker.setParameters({ tessedit_pageseg_mode: '6', preserve_interword_spaces: '1' });
+  await worker.setParameters({
+    tessedit_pageseg_mode: '6',
+    preserve_interword_spaces: '1',
+    tessedit_char_whitelist: '',
+  });
   const bodyResult = await worker.recognize(bodyImage, {}, { text: true, tsv: true });
   const bodyWords = parseTsv(bodyResult.data.tsv, 1 / BOARD_SCALE, headerBottom);
 
@@ -303,6 +423,19 @@ async function recognizeBoard(buffer) {
   const labels = await recognizeSectionLabels(buffer, width, height, headerBottom, rgb, info.channels);
   const dividers = findSectionDividers(rgb, width, height, info.channels, headerBottom);
   const sections = buildSections(labels, dividers, headerBottom, height);
+  if (process.env.OCR_DEBUG) {
+    console.log('[OCR] headerBottom', headerBottom, 'dividers', JSON.stringify(dividers),
+      'labels', JSON.stringify(labels), 'sections', JSON.stringify(sections));
+  }
+
+  const warnings = [];
+  sections.forEach((section, index) => {
+    if (!section.text) {
+      warnings.push(`第 ${index + 1} 段未识别到评级标签，默认按 AAA 处理，请核对`);
+    } else if (section.inferred) {
+      warnings.push(`第 ${index + 1} 段未识别到评级标签，已按 ${section.text} 推定，请核对`);
+    }
+  });
 
   return {
     board: true,
@@ -314,6 +447,7 @@ async function recognizeBoard(buffer) {
     headerWords,
     bodyWords,
     sections,
+    warnings,
   };
 }
 
@@ -342,7 +476,11 @@ router.post('/ocr', async (req, res) => {
 
     const text = await enqueue(async () => {
       const worker = await getWorker();
-      await worker.setParameters({ tessedit_pageseg_mode: '3', preserve_interword_spaces: '1' });
+      await worker.setParameters({
+        tessedit_pageseg_mode: '3',
+        preserve_interword_spaces: '1',
+        tessedit_char_whitelist: '',
+      });
       const { data } = await worker.recognize(buffer);
       return data.text || '';
     });
