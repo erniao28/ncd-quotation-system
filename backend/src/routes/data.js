@@ -18,6 +18,8 @@ import {
   getIssuanceByBank,
   getIssuanceDailySummary,
   getIssuanceBankCompare,
+  // 银行主体评级（看板识别用）
+  getBankRatings,
   getMonthlyStats,
   syncIssuanceData,
   getIssuanceMatrix,
@@ -38,6 +40,18 @@ import {
 import { syncNcdDaily, backfillNcd, syncBankRatings } from '../dm.js';
 
 const router = express.Router();
+
+// ========== 银行主体评级 ==========
+
+// 全部银行评级（看板识别时，匹配到词库的银行用这里的评级覆盖分区标签）
+router.get('/bank-ratings', (req, res) => {
+  try {
+    res.json(getBankRatings());
+  } catch (error) {
+    console.error('[API] 获取银行评级失败:', error);
+    res.status(500).json({ error: '获取银行评级失败' });
+  }
+});
 
 // ========== 板块管理 ==========
 

@@ -376,6 +376,13 @@ export async function fetchNcdCategories() {
   return res.json();
 }
 
+// 银行主体评级（看板识别时用库里的评级覆盖分区标签）
+export async function fetchBankRatings() {
+  const res = await fetch(`${API_BASE}/data/bank-ratings`);
+  if (!res.ok) throw new Error('获取银行评级失败');
+  return res.json();
+}
+
 export async function fetchNcdMaturityState() {
   const res = await fetch(`${API_BASE}/data/ncd-maturity/state`);
   if (!res.ok) throw new Error('获取抓取状态失败');

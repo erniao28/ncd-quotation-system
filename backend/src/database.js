@@ -567,6 +567,15 @@ function upsertBankRatings(rows) {
   return { count };
 }
 
+// 全部银行主体评级（看板识别时用库里的评级覆盖分区标签）
+function getBankRatings() {
+  const stmt = db.prepare(`SELECT bank_name, rating FROM bank_rating WHERE rating IS NOT NULL`);
+  const out = [];
+  while (stmt.step()) out.push(stmt.getAsObject());
+  stmt.free();
+  return out;
+}
+
 // 还没有评级的银行（只查这些，避免重复调用）
 function getBanksNeedingRating() {
   const stmt = db.prepare(`
@@ -1162,6 +1171,7 @@ export {
   getNcdMaturityDates,
   // 银行主体评级 / 类别
   upsertBankRatings,
+  getBankRatings,
   getBanksNeedingRating,
   getAllNcdIssuers,
   refreshBankMeta,

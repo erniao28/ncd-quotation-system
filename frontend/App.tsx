@@ -3,6 +3,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Quotation, GroupedQuotation, MaturityInfo } from './types';
 import { parseQuotations, parseMaturityDates, normalizeOcrText } from './services/parser';
 import { parseBoard } from './services/boardParser';
+import { ensureBankRatingsLoaded, getBankRating } from './services/bankRatings';
 import { VisualCard } from './components/VisualCard';
 import { DataSupport } from './DataSupport';
 import {
@@ -25,7 +26,7 @@ import {
 } from './services/api';
 import html2canvas from 'html2canvas';
 
-const APP_VERSION = '20261124'; // 版本号：YYYYMMDD 格式
+const APP_VERSION = '20261128'; // 版本号：YYYYMMDD 格式
 
 // 看板图片可选的类别列（顺序固定）
 const BOARD_CATEGORY_OPTIONS = [
@@ -355,7 +356,8 @@ const App: React.FC = () => {
           try {
             setOcrStatus(`正在识别看板图 ${i + 1}/${images.length}`);
             const result = await ocrBoard(prepared.dataUrl);
-            const quotes = parseBoard(result);
+            await ensureBankRatingsLoaded();
+            const quotes = parseBoard(result, getBankRating);
             if (quotes.length > 0) {
               boardQuotes.push(...(quotes as Partial<Quotation>[]));
               boardWarnings.push(...(result.warnings || []));

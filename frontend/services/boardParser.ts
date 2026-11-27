@@ -376,7 +376,12 @@ function sectionStyle(text: string): SectionStyle | null {
   return null;
 }
 
-function buildQuote(row: OcrWord[], group: HeaderGroup, style: SectionStyle | null): BoardQuote | null {
+function buildQuote(
+  row: OcrWord[],
+  group: HeaderGroup,
+  style: SectionStyle | null,
+  ratingOf?: (bankName: string) => string | null,
+): BoardQuote | null {
   const sorted = [...row].sort((a, b) => a.left - b.left);
   const minLeft = Number.isFinite(group.low) ? group.low : 0;
 
@@ -408,11 +413,13 @@ function buildQuote(row: OcrWord[], group: HeaderGroup, style: SectionStyle | nu
   });
   const remarks = cleanRemarks(remarksWords.map(word => word.text).join(''));
 
-  const rating = style?.rating || 'AAA';
+  // 银行一旦匹配到词库，优先用库里的主体评级，避免分区标签误读导致整栏评级错乱
+  const libRating = ratingOf ? ratingOf(bankName) : null;
+  const rating = libRating || style?.rating || 'AAA';
   return {
     bankName,
     rating,
-    category: style?.category || getCategory(bankName, rating),
+    category: libRating ? getCategory(bankName, rating) : (style?.category || getCategory(bankName, rating)),
     tenor: group.tenor,
     yieldRate: yieldValue,
     volume: '',
@@ -424,7 +431,10 @@ function buildQuote(row: OcrWord[], group: HeaderGroup, style: SectionStyle | nu
   };
 }
 
-export function parseBoard(result: BoardOcrResult | null | undefined): BoardQuote[] {
+export function parseBoard(
+  result: BoardOcrResult | null | undefined,
+  ratingOf?: (bankName: string) => string | null,
+): BoardQuote[] {
   if (!result?.board) return [];
 
   const groups = parseHeaderWords(result.headerWords || []);
@@ -449,7 +459,7 @@ export function parseBoard(result: BoardOcrResult | null | undefined): BoardQuot
     for (const row of groupRows(columnWords)) {
       const rowY = row.reduce((sum, word) => sum + centerY(word), 0) / row.length;
       const section = sections.find(item => rowY >= item.top && rowY < item.bottom);
-      const quote = buildQuote(row, group, section?.style || null);
+      const quote = buildQuote(row, group, section?.style || null, ratingOf);
       if (!quote) continue;
 
       // 同一银行同一期限可能挂两条报价（如上海银行 1Y 1.43 / 1.415），key 必须带上收益率
